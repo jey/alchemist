@@ -9,6 +9,18 @@ import breeze.numerics._
 
 object BasicSuite {
   def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName("Alchemist Test")
+    val sc = new SparkContext(conf)
+    System.err.println("test: creating alchemist")
+    val al = new Alchemist(sc)
+    System.err.println("test: done creating alchemist")
+    val rddA = randomMatrix(sc, 300, 500)
+    rddA.rows.cache
+    val rddB = randomMatrix(sc, 500, 200)
+    rddB.rows.cache
+    val alA = AlMatrix(al, rddA)
+    al.stop
+    sc.stop
   }
 
   def randomMatrix(sc: SparkContext, numRows: Int, numCols: Int): IndexedRowMatrix = {

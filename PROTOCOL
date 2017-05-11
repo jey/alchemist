@@ -1,0 +1,58 @@
+Protocol between Spark Driver and Alchemist Driver (AlDriver):
+  - Spark Driver sends sequence of commands to AlDriver, and AlDriver sends
+    replies synchronously
+  - all values are sent and received in network byte order
+  - each command starts with a 32-bit "message type" field.
+
+  - MESSAGE TYPES
+    - handshake
+      cmd:
+        uint32_t typeCode = 0xABCD
+        uint32_t protocolVersion = 0x1
+
+      reply:
+        uint32_t statusCode = 0xDCBA
+        uint32_t protocolVersion = 0x1
+        uint32_t numWorkers = number of AlWorkers
+        WorkerInfo workers[numWorkers]
+
+
+    - shutdown
+        uint32_t typeCode = 0xFFFFFFFF
+
+      reply:
+        uint32_t statusCode = 0x1
+
+    - newMatrix
+        uint32_t typeCode = 0x1
+        uint64_t numRows
+        uint64_t numCols
+        uint64_t numWorkers
+        // each entry of layout must be number of rows to be recvd by that worker
+        uint32_t layout[numWorkers]
+
+      reply 1: "ready for receiving data"
+        uint32_t statusCode = 0x1
+        uint32_t matrixHandle
+
+      [then spark sends data to workers]
+
+      reply 2: "matrix successfully loaded"
+        uint32_t statusCode = 0x1
+
+  - STRUCTS
+    - string
+      uint32_t length
+      uint8_t data[length]
+
+    - WorkerInfo:
+        string hostname
+        uint32_t port
+
+
+Block transfer protocol of AlWorker:
+  uint32_t typeCode = 0x1
+  uint32_t matrixHandle
+  uint64_t rowIdx
+  uint64_t numCols
+  double rowData[numCols]

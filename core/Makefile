@@ -9,6 +9,8 @@ SRC_PATH = src/main
 CXXFLAGS = $(EL_COMPILE_FLAGS) -Wall -Wno-unused
 LDFLAGS = $(EL_LINK_FLAGS) -Wl,-rpath,$(EL_LIB) $(EL_LIBS)
 
+LDFLAGS += -lboost_serialization -lboost_mpi
+
 ifdef ALPREFIX
   LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 endif
