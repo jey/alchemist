@@ -25,6 +25,15 @@ struct Worker {
   int main();
 };
 
+void MatrixMulCommand::run(Worker *self) const {
+  auto m = self->matrices[inputA]->Height();
+  auto n = self->matrices[inputB]->Width();
+  DistMatrix * matrix = new El::DistMatrix<double, El::MC, El::STAR>(m, n, self->grid);
+  ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
+  El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
+  self->world.barrier();
+}
+
 void NewMatrixCommand::run(Worker *self) const {
   DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::STAR>(numRows, numCols, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);

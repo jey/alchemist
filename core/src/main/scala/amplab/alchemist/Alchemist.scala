@@ -105,6 +105,25 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return handle
   }
 
+  def matrixMulStart(matA: MatrixHandle, matB: MatrixHandle) : MatrixHandle = {
+    output.writeInt(0x2)
+    output.writeInt(matA.id)
+    output.writeInt(matB.id)
+    output.flush()
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+    val handle = new MatrixHandle(input.readInt())
+    System.err.println(s"got handle: ${handle.id}")
+    return handle
+  }
+
+  def matrixMulFinish(mat: MatrixHandle) = {
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError() 
+    } 
+  }
+
   def newMatrixFinish(mat: MatrixHandle) = {
     if(input.readInt() != 0x1) {
       throw new ProtocolError()
@@ -152,5 +171,11 @@ class Alchemist(val sc: SparkContext) {
 
   def stop(): Unit = {
     driver.stop
+  }
+
+  def matMul(matA: AlMatrix, matB: AlMatrix) : AlMatrix = {
+    val handle = client.matrixMulStart(matA.handle, matB.handle)
+    client.matrixMulFinish(handle)
+    new AlMatrix(this, handle)
   }
 }

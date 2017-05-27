@@ -77,6 +77,27 @@ struct HaltCommand : Command {
   }
 };
 
+struct MatrixMulCommand : Command {
+  MatrixHandle handle;
+  MatrixHandle inputA;
+  MatrixHandle inputB;
+
+  explicit MatrixMulCommand() {}
+
+  MatrixMulCommand(MatrixHandle dest, MatrixHandle A, MatrixHandle B) :
+    handle(dest), inputA(A), inputB(B) {}
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive & ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & handle;
+    ar & inputA;
+    ar & inputB;
+  }
+};
+
 struct NewMatrixCommand : Command {
   MatrixHandle handle;
   size_t numRows;
@@ -113,5 +134,6 @@ int workerMain(const mpi::communicator &world, const mpi::communicator &peers);
 BOOST_CLASS_EXPORT_KEY(alchemist::Command);
 BOOST_CLASS_EXPORT_KEY(alchemist::HaltCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::NewMatrixCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::MatrixMulCommand);
 
 #endif

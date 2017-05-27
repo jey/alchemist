@@ -19,6 +19,8 @@ object BasicSuite {
     val rddB = randomMatrix(sc, 500, 200)
     rddB.rows.cache
     val alA = AlMatrix(al, rddA)
+    val alB = AlMatrix(al, rddB)
+    val alC = al.matMul(alA, alB)
     al.stop
     sc.stop
   }

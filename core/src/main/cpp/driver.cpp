@@ -14,7 +14,7 @@ struct Driver {
   DataInputStream input;
   DataOutputStream output;
   std::vector<WorkerInfo> workers;
-  std::map<MatrixHandle, NewMatrixCommand> matrices;
+  std::map<MatrixHandle, NewMatrixCommand> matrices; // need to account for other commands that generate (multiple) matrices 
   uint32_t nextMatrixId;
 
   Driver(const mpi::communicator &world, std::istream &is, std::ostream &os);
@@ -22,6 +22,7 @@ struct Driver {
   int main();
 
   void handle_newMatrix();
+  void handle_matrixMul();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os) :
@@ -71,6 +72,11 @@ int Driver::main() {
         handle_newMatrix();
         break;
 
+      // matrix multiplication
+      case 0x2:
+        handle_matrixMul();
+        break;
+
       default:
         std::cerr << "Unknown typeCode: " << std::hex << typeCode << std::endl;
         abort();
@@ -80,6 +86,28 @@ int Driver::main() {
   // wait for workers to reach exit
   world.barrier();
   return EXIT_SUCCESS;
+}
+
+void Driver::handle_matrixMul() {
+  uint32_t handleA = input.readInt();
+  uint32_t handleB = input.readInt();
+
+  MatrixHandle destHandle{nextMatrixId++};
+
+
+  MatrixMulCommand cmd(destHandle, MatrixHandle{handleA}, MatrixHandle{handleB});
+  // ideally would add to struct var "matrices", but this is not a NewMatrixCommand
+  issue(cmd);
+
+  // tell spark id of resulting matrix
+  output.writeInt(0x1); // statusCode
+  output.writeInt(destHandle.id);
+  output.flush();
+
+  // wait for it to finish
+  world.barrier();
+  output.writeInt(0x1);
+  output.flush();
 }
 
 void Driver::handle_newMatrix() {

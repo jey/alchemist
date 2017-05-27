@@ -1,7 +1,8 @@
 package amplab.alchemist
 import org.apache.spark.mllib.linalg.distributed.{IndexedRow, IndexedRowMatrix}
 
-class AlMatrix(val al: Alchemist, handle: MatrixHandle) {
+class AlMatrix(val al: Alchemist, mhandle: MatrixHandle) {
+  val handle : MatrixHandle = mhandle
 }
 
 object AlMatrix {

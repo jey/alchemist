@@ -40,6 +40,14 @@ Protocol between Spark Driver and Alchemist Driver (AlDriver):
       reply 2: "matrix successfully loaded"
         uint32_t statusCode = 0x1
 
+    - matrixMul
+        uint32_t matrixHandle 
+        uint32_t matrixHandle 
+
+      reply:
+        uint32_t statusCode = 0x1
+        uint32_t matrixHandle
+
   - STRUCTS
     - string
       uint32_t length
