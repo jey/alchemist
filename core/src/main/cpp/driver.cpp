@@ -77,6 +77,11 @@ int Driver::main() {
         handle_matrixMul();
         break;
 
+      // get matrix dimensions
+      case 0x3:
+        handle_matrixDims();
+        break;
+
       default:
         std::cerr << "Unknown typeCode: " << std::hex << typeCode << std::endl;
         abort();
@@ -93,10 +98,15 @@ void Driver::handle_matrixMul() {
   uint32_t handleB = input.readInt();
 
   MatrixHandle destHandle{nextMatrixId++};
-
-
   MatrixMulCommand cmd(destHandle, MatrixHandle{handleA}, MatrixHandle{handleB});
-  // ideally would add to struct var "matrices", but this is not a NewMatrixCommand
+
+  // add a dummy newmatrixcommand to track this matrix
+  std::vector<uint32_t> dummy_layout(1);
+  auto numRows = matrices[MatrixHandle{handleA}].numRows;
+  auto numCols = matrices[MatrixHandle{handleB}].numCols;
+  NewMatrixCommand cmd(destHandle, numRows, numCols, dummy_layout);
+  ENSURE(matrices.insert(std::make_pair(destHandle, cmd)).second);
+
   issue(cmd);
 
   // tell spark id of resulting matrix
@@ -108,6 +118,17 @@ void Driver::handle_matrixMul() {
   world.barrier();
   output.writeInt(0x1);
   output.flush();
+}
+
+void Driver::handle_matrixDims() {
+  uint32_t matrixHandle = input.readInt();
+  matrixCmd = matrices[MatrixHandle{matrixHandle}];
+
+  output.writeInt(0x1);
+  output.writeLong(matrixCmd.numRows);
+  output.writeLong(matrixCmd.numCols);
+  output.flush();
+
 }
 
 void Driver::handle_newMatrix() {

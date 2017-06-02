@@ -7,6 +7,9 @@ import java.io.{
     DataInputStream => JDataInputStream,
     DataOutputStream
 }
+import java.nio.{
+    DoubleBuffer, ByteBuffer
+}
 import java.nio.charset.StandardCharsets
 
 class DataInputStream(istream: InputStream) extends JDataInputStream(istream) {
@@ -14,6 +17,17 @@ class DataInputStream(istream: InputStream) extends JDataInputStream(istream) {
     val buf = new Array[Byte](readInt())
     read(buf)
     buf
+  }
+
+  def readDoubleArray(): Array[Double] = {
+    // http://www.scala-lang.org/old/node/11002
+    // maybe this code is inefficient; can make more efficient using
+    // platform dependent (endianness) code?
+    // is there not a fast readDouble() primitive in JDataInputStream?
+    val buf = readBuffer()
+    val dbuf = DoubleBuffer.allocate(buf.length/8)
+    dbuf.put(ByteBuffer.wrap(buf).asDoubleBuffer)
+    dbuf.array
   }
 
   def readString(): String = {
@@ -33,6 +47,7 @@ class MatrixHandle(val id: Int) extends Serializable {
 class WorkerClient(val hostname: String, val port: Int) {
   val sock = new java.net.Socket(hostname, port)
   val output = new DataOutputStream(sock.getOutputStream)
+  val input = new DataInputSream(sock.getInputStream)
 
   def newMatrix_addRow(handle: MatrixHandle, rowIdx: Long, vals: Array[Double]) = {
     output.writeInt(0x1)  // typeCode = addRow
@@ -46,6 +61,19 @@ class WorkerClient(val hostname: String, val port: Int) {
 
   def newMatrix_partitionComplete(handle: MatrixHandle) = {
     output.writeInt(0x2)  // typeCode = partitionComplete
+  }
+
+  // difficulty? multiple spark workers can be trying to get rows from the 
+  // same alchemist worker at the same time
+  def getIndexedRowMatrix_getRow(handle: MatrixHandle, rowIndex : Long) : DenseVector = {
+    output.writeInt(0x3) // typeCode = getRow
+    output.writeInt(handle.id)
+    output.writeLong(rowIndex)
+    new DenseVector(input.readDoubleArray())
+  }
+
+  def getIndexedRowMatrix_partitionComplete(handle: MatrixHandle) = {
+    output.writeInt(0x4) // typeCode = doneGettingRows
   }
 
   def close() = {
@@ -129,6 +157,32 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
       throw new ProtocolError()
     }
   }
+
+  def getMatrixDimensions(mat: MatrixHandle) : Tuple2[Long, Int] = {
+    output.writeInt(0x3)
+    output.writeInt(mat.id)
+    output.flush()
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+    return (input.readLong(), input.readLong().toInt)
+  }
+
+  def getIndexedRowMatrixStart(mat: MatrixHandle) = {
+    output.writeInt(0x4)
+    output.writeInt(mat.id)
+    output.flush()
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+  }
+
+  def getIndexedRowMatrixFinish(mat: MatrixHandle) = {
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+  }
+
 }
 
 class Driver {
@@ -162,8 +216,9 @@ class AlContext(driver: DriverClient) extends Serializable {
   }
 }
 
-class Alchemist(val sc: SparkContext) {
+class Alchemist(val mysc: SparkContext) {
   System.err.println("launching alchemist")
+  val sc : SparkContext = mysc
 
   val driver = new Driver()
   val client = driver.client

@@ -204,7 +204,7 @@ int Worker::main() {
 }
 
 int workerMain(const mpi::communicator &world, const mpi::communicator &peers) {
-  ENSURE(::dup2(2, 1) == 1);
+  ENSURE(::dup2(2, 1) == 1); // replaces stdout w/ stderr?
   return Worker(world, peers).main();
 }
 
