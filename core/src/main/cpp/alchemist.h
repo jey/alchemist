@@ -102,7 +102,7 @@ struct MatrixGetRowsCommand : Command {
   MatrixHandle handle;
   std::vector<WorkerId> layout;
 
-  explicit MatrixGetRowsCommand() : {}
+  explicit MatrixGetRowsCommand() {}
 
   MatrixGetRowsCommand(MatrixHandle handle, std::vector<WorkerId> layout) : 
     handle(handle), layout(layout) {}

@@ -111,8 +111,8 @@ void Driver::handle_matrixMul() {
   std::vector<uint32_t> dummy_layout(1);
   auto numRows = matrices[MatrixHandle{handleA}].numRows;
   auto numCols = matrices[MatrixHandle{handleB}].numCols;
-  NewMatrixCommand cmd(destHandle, numRows, numCols, dummy_layout);
-  ENSURE(matrices.insert(std::make_pair(destHandle, cmd)).second);
+  NewMatrixCommand dummycmd(destHandle, numRows, numCols, dummy_layout);
+  ENSURE(matrices.insert(std::make_pair(destHandle, dummycmd)).second);
 
   issue(cmd);
 
@@ -129,7 +129,7 @@ void Driver::handle_matrixMul() {
 
 void Driver::handle_matrixDims() {
   uint32_t matrixHandle = input.readInt();
-  matrixCmd = matrices[MatrixHandle{matrixHandle}];
+  auto matrixCmd = matrices[MatrixHandle{matrixHandle}];
 
   output.writeInt(0x1);
   output.writeLong(matrixCmd.numRows);
@@ -139,7 +139,7 @@ void Driver::handle_matrixDims() {
 }
 
 void Driver::handle_getMatrixRows() {
-  uint32_t matrixHandle = input.readInt();
+  MatrixHandle handle{input.readInt()};
   uint64_t layoutLen = input.readLong();
   std::vector<uint32_t> layout;
   layout.reserve(layoutLen);

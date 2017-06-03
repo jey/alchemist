@@ -22,7 +22,8 @@ struct Worker {
   }
 
   void receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId> &layout);
-  void sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &layout);
+  void sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &layout, 
+      const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose);
   int main();
 };
 
@@ -37,16 +38,14 @@ void MatrixMulCommand::run(Worker *self) const {
 
 // TODO: should send back blocks of rows instead of rows? maybe conversion on other side is cheaper?
 void  MatrixGetRowsCommand::run(Worker * self) const {
-  auto numRowsFromMe = std::count(layout.begin(), layout.end(), self->id);
-  auto matrix = self->matrices[handle];
-  auto numCols = matrix->Width();
-  matrix.ReservePulls(numRowsFromMe*numCols);
+  uint64_t numRowsFromMe = std::count(layout.begin(), layout.end(), self->id);
+  auto matrix = self->matrices[handle].get();
+  uint64_t numCols = matrix->Width();
+  matrix->ReservePulls(numRowsFromMe*numCols);
 
-  uint64_t curChunkOffset = 0;
   std::map<uint64_t, uint64_t> localRowIndices; // maps rows in the matrix to rows in the local storage
-  El::Matrix<double> localData, localDataTranspose;
+  El::Matrix<double> localDataTranspose;
   localDataTranspose.Resize(numCols, numRowsFromMe); // b/c Elemental uses column-major format
-  localRowIndices.reserve(numRowsFromMe);
 
   for(uint64_t curRowIdx = 0; localRowIndices.size() < numRowsFromMe; curRowIdx++) {
     if( layout[curRowIdx] == self->id ) {
@@ -58,9 +57,8 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
     }
   } 
   matrix->ProcessPullQueue(localDataTranspose.Buffer());
-  El::Transpose(localDataTranspose, localData);
 
-  self->sendMatrixRows(handle, layout, localRowIndices, &localData);
+  self->sendMatrixRows(handle, layout, localRowIndices, &localDataTranspose);
   self->world.barrier();
 }
 
@@ -79,21 +77,21 @@ void HaltCommand::run(Worker *self) const {
 
 struct WorkerClientSendHandler {
   int sock;
-  short PollEvents;
+  short pollEvents;
   std::vector<char> inbuf;
   std::vector<char> outbuf;
-  uint64_t localRowIdx;
   size_t inpos;
   size_t outpos;
   std::map<uint64_t, uint64_t> localRowIndices;
-  El::Matrix * localData;
+  const El::Matrix<double> * localDataTranspose;
   MatrixHandle handle;
 
   // only set POLLOUT when have data to send
   // sends 0x3 code (uint32), then matrix handle (uint32), then row index (long = uint64_t)
-  WorkerClientSendHandler(int sock, MatrixHandle handle, const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix &localData) :
-    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(localData->Width() * 8), localRowIdx(0), inpos(0), outpos(0), 
-    localRowIndices(localRowIndices), localData(localData), handle(handle) {
+  // localDataTranspose is a matrix each of whose columns is a row of the distributed matrix stored locally
+  WorkerClientSendHandler(int sock, MatrixHandle handle, const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose) :
+    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(localDataTranspose->Height() * 8), inpos(0), outpos(0), 
+    localRowIndices(localRowIndices), localDataTranspose(localDataTranspose), handle(handle) {
   }
 
   ~WorkerClientSendHandler() {
@@ -114,6 +112,7 @@ struct WorkerClientSendHandler {
   int handleEvent(short revents) {
     mpi::communicator world;
     int rowsCompleted = 0;
+
     if(revents & POLLIN) {
       while(true) {
         int count = recv(sock, &inbuf[inpos], inbuf.size() - inpos, 0);
@@ -143,23 +142,47 @@ struct WorkerClientSendHandler {
               dataPtr += 4;
               uint64_t rowIdx = ntohll(*(uint64_t*)dataPtr);
               dataPtr += 8;
-              localRowOffset = localRowIndices[rowIdx];
+              uint64_t localRowOffset = localRowIndices[rowIdx];
+              memcpy( &outbuf, (void *) (localDataTranspose->LockedBuffer() + 
+                    localDataTranspose->Height()*localRowOffset), localDataTranspose->Height()*8);
               inpos = 0;
-              outbuf = 
-              pollEvents = POLLOUT;
+              pollEvents = POLLOUT; // after parsing the request, send the data
+              break;
+            } else if(typeCode == 0x4) {
+              // partition completed
+              rowsCompleted++;
+              close();
             }
-          } else if(typeCode == 0x4) {
-            // partition completed
-            rowsCompleted++;
-            close();
           }
         }
       }
     } else if(revents & POLLOUT) {
-    
-      if (outpos == outpos.size()) {
-        outpos = 0;
-        pollEvents = POLLIN;
+      // a la https://stackoverflow.com/questions/12170037/when-to-use-the-pollout-event-of-the-poll-c-function
+      // and http://www.kegel.com/dkftpbench/nonblocking.html
+      while(true) {
+        int count = write(sock, &outbuf[outpos], outbuf.size() - outpos);
+        if (count == 0) {
+          break; 
+        } else if(count == -1) {
+          if(errno == EAGAIN || errno == EINTR) {
+            continue;
+          } else if(errno == ECONNRESET) {
+            close();
+            break;
+          } else {
+            // TODO
+            abort();
+          } 
+        } else {
+          ENSURE(count > 0);
+          outpos += count;
+          ENSURE(outpos <= outbuf.size());
+          if (outpos == outbuf.size()) { // after sending the row, wait for the next request
+            outpos = 0;
+            pollEvents = POLLIN;
+            break;
+          }
+        }
       }
     }
 
@@ -249,7 +272,8 @@ struct WorkerClientRecieveHandler {
   }
 };
 
-void Worker::sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &layout, const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix * localData) {
+void Worker::sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &layout,
+    const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose) {
   auto numRowsFromMe = std::count(layout.begin(), layout.end(), this->id);
   std::vector<std::unique_ptr<WorkerClientSendHandler>> clients;
   std::vector<pollfd> pfds;
@@ -277,10 +301,10 @@ void Worker::sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &la
           ENSURE(revents == POLLIN);
           sockaddr_in addr;
           socklen_t addrlen = sizeof(addr);
-          int clientSock = accept(listenSock, reinterpret_cast<sockadd*>(&addr), &addrlen);
+          int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
           ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
-          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, handle, localRowIndices, localData));
+          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, handle, localRowIndices, localDataTranspose));
           clients.push_back(std::move(client));
         } else {
           ENSURE(clients[idx]->sock == curSock); // how could this not be the case?
