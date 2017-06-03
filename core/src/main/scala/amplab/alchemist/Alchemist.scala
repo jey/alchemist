@@ -57,6 +57,7 @@ class WorkerClient(val hostname: String, val port: Int) {
     for(v <- vals) {
       output.writeDouble(v)
     }
+    output.flush()
   }
 
   def newMatrix_partitionComplete(handle: MatrixHandle) = {
@@ -69,11 +70,13 @@ class WorkerClient(val hostname: String, val port: Int) {
     output.writeInt(0x3) // typeCode = getRow
     output.writeInt(handle.id)
     output.writeLong(rowIndex)
+    output.flush()
     new DenseVector(input.readDoubleArray())
   }
 
   def getIndexedRowMatrix_partitionComplete(handle: MatrixHandle) = {
     output.writeInt(0x4) // typeCode = doneGettingRows
+    output.flush()
   }
 
   def close() = {
