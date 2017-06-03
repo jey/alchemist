@@ -21,6 +21,7 @@ object BasicSuite {
     val alA = AlMatrix(al, rddA)
     val alB = AlMatrix(al, rddB)
     val alC = al.matMul(alA, alB)
+    val res = alC.getIndexedRowMatrix()
     al.stop
     sc.stop
   }

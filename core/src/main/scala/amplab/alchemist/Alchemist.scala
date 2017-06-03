@@ -1,5 +1,6 @@
 package amplab.alchemist
 import org.apache.spark.SparkContext
+import org.apache.spark.mllib.linalg.DenseVector
 import scala.collection.JavaConverters._
 import scala.util.Random
 import java.io.{
@@ -47,7 +48,7 @@ class MatrixHandle(val id: Int) extends Serializable {
 class WorkerClient(val hostname: String, val port: Int) {
   val sock = new java.net.Socket(hostname, port)
   val output = new DataOutputStream(sock.getOutputStream)
-  val input = new DataInputSream(sock.getInputStream)
+  val input = new DataInputStream(sock.getInputStream)
 
   def newMatrix_addRow(handle: MatrixHandle, rowIdx: Long, vals: Array[Double]) = {
     output.writeInt(0x1)  // typeCode = addRow

@@ -10,27 +10,31 @@ class AlMatrix(val mal: Alchemist, mhandle: MatrixHandle) {
     return al.client.getMatrixDimensions(handle)
   }
 
+  // Caches result by default, because may not want to recreate (e.g. if delete referenced matrix on Alchemist side to save memory)
   def getIndexedRowMatrix() : IndexedRowMatrix = {
     val (numRows, numCols) = getDimensions()
     // TODO:
     // should map the rows back to the executors using locality information if possible
     // otherwise shuffle the rows on the MPI side before sending them back to SPARK
-    val numPartitions = max(sc.defaultParallelism, al.client.workerCount)
-    val sacrificialRDD = sc.parallelize(1 to numRows, numPartitions)
-    val layout : Array[WorkerId] = (1 to sacrificialRDD.partitions.count).map(x => new WorkerId(x % al.client.workerCount))
+    val numPartitions = max(al.sc.defaultParallelism, al.client.workerCount)
+    val sacrificialRDD = al.sc.parallelize(1 to numRows.toInt, numPartitions)
+    val layout : Array[WorkerId] = (1 to sacrificialRDD.partitions.size).map(x => new WorkerId(x % al.client.workerCount)).toArray
 
     al.client.getIndexedRowMatrixStart(handle, layout)
-    val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, part) => {
-      val worker = ctx.connectWorker(layout(idx))
-      val result = part.foreach { rowIndex => 
+    val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
+      val worker = al.context.connectWorker(layout(idx))
+      val result  = rowindices.toList.map { rowIndex => 
         new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex))
-      }
+      }.iterator
       worker.getIndexedRowMatrix_partitionComplete(handle)
       worker.close()
-      Iterator.single(result)}, 
+      result}, 
       preservesPartitioning=true)
+    val result = new IndexedRowMatrix(rows, numRows, numCols)
+    result.rows.cache()
+    result.rows.count
     al.client.getIndexedRowMatrixFinish(handle)
-    new IndexedRowMatrix(rows, numRows, numCols)
+    result
   } 
 
 }
@@ -53,7 +57,6 @@ object AlMatrix {
       Iterator.single(true)
     }.count
     al.client.newMatrixFinish(handle)
-    result = new AlMatrix(al, handle)
-    return result
+    new AlMatrix(al, handle)
   }
 }
