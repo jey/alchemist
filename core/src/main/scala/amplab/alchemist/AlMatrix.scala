@@ -2,10 +2,7 @@ package amplab.alchemist
 import org.apache.spark.mllib.linalg.distributed.{IndexedRow, IndexedRowMatrix}
 import scala.math.max
 
-class AlMatrix(val mal: Alchemist, mhandle: MatrixHandle) {
-  val handle : MatrixHandle = mhandle
-  val al : Alchemist = mal
-
+class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
   def getDimensions() : Tuple2[Long, Int] = {
     return al.client.getMatrixDimensions(handle)
   }
@@ -20,16 +17,20 @@ class AlMatrix(val mal: Alchemist, mhandle: MatrixHandle) {
     val sacrificialRDD = al.sc.parallelize(1 to numRows.toInt, numPartitions)
     val layout : Array[WorkerId] = (1 to sacrificialRDD.partitions.size).map(x => new WorkerId(x % al.client.workerCount)).toArray
 
+    // capture references needed by the closure without capturing `this.al`
+    val ctx = al.context
+    val handle = this.handle
+
     al.client.getIndexedRowMatrixStart(handle, layout)
     val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
-      val worker = al.context.connectWorker(layout(idx))
+      val worker = ctx.connectWorker(layout(idx))
       val result  = rowindices.toList.map { rowIndex => 
         new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex))
       }.iterator
       worker.getIndexedRowMatrix_partitionComplete(handle)
       worker.close()
-      result}, 
-      preservesPartitioning=true)
+      result
+    }, preservesPartitioning=true)
     val result = new IndexedRowMatrix(rows, numRows, numCols)
     result.rows.cache()
     result.rows.count

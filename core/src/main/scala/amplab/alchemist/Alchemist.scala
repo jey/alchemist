@@ -229,6 +229,9 @@ class Alchemist(val mysc: SparkContext) {
 
   val driver = new Driver()
   val client = driver.client
+
+  // Instances of `Alchemist` are not serializable, but `.context`
+  // has everything needed for RDD operations and is serializable.
   val context = new AlContext(client)
 
   def stop(): Unit = {
