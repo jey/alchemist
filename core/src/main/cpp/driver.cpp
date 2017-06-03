@@ -23,6 +23,8 @@ struct Driver {
 
   void handle_newMatrix();
   void handle_matrixMul();
+  void handle_matrixDims();
+  void handle_getMatrixRows();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os) :
@@ -82,6 +84,11 @@ int Driver::main() {
         handle_matrixDims();
         break;
 
+      // return matrix to Spark
+      case 0x4:
+        handle_getMatrixRows();
+        break;
+
       default:
         std::cerr << "Unknown typeCode: " << std::hex << typeCode << std::endl;
         abort();
@@ -129,6 +136,28 @@ void Driver::handle_matrixDims() {
   output.writeLong(matrixCmd.numCols);
   output.flush();
 
+}
+
+void Driver::handle_getMatrixRows() {
+  uint32_t matrixHandle = input.readInt();
+  uint64_t layoutLen = input.readLong();
+  std::vector<uint32_t> layout;
+  layout.reserve(layoutLen);
+  for(uint64_t part = 0; part < layoutLen; ++part) {
+    layout.push_back(input.readInt());
+  }
+
+  MatrixGetRowsCommand cmd(handle, layout);
+  issue(cmd);
+
+  // tell Spark to start asking for rows
+  output.writeInt(0x1);
+  output.flush();
+
+  // wait for it to finish
+  world.barrier();
+  output.writeInt(0x1);
+  output.flush();
 }
 
 void Driver::handle_newMatrix() {

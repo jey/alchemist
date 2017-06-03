@@ -15,4 +15,5 @@ int main(int argc, char *argv[]) {
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::Command);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::HaltCommand);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::NewMatrixCommand);
-BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::MatrixMulCommand)
+BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::MatrixMulCommand);
+BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::MatrixGetRowsCommand);

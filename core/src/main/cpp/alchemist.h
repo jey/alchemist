@@ -98,6 +98,25 @@ struct MatrixMulCommand : Command {
   }
 };
 
+struct MatrixGetRowsCommand : Command {
+  MatrixHandle handle;
+  std::vector<WorkerId> layout;
+
+  explicit MatrixGetRowsCommand() : {}
+
+  MatrixGetRowsCommand(MatrixHandle handle, std::vector<WorkerId> layout) : 
+    handle(handle), layout(layout) {}
+
+  virtual void run(Worker * self) const;
+
+  template <typename Archive>
+  void serialize(Archive &ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & handle;
+    ar & layout;
+  }
+};
+
 struct NewMatrixCommand : Command {
   MatrixHandle handle;
   size_t numRows;
@@ -135,5 +154,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::Command);
 BOOST_CLASS_EXPORT_KEY(alchemist::HaltCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::NewMatrixCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::MatrixMulCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::MatrixGetRowsCommand);
 
 #endif

@@ -22,6 +22,7 @@ struct Worker {
   }
 
   void receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId> &layout);
+  void sendMatrixRows(MatrixHandle handle);
   int main();
 };
 
@@ -32,6 +33,11 @@ void MatrixMulCommand::run(Worker *self) const {
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
   self->world.barrier();
+}
+
+// TODO: should send back blocks of rows instead of rows? maybe conversion on other side is cheaper?
+void  MatrixGetRowsCommand::run(Worker * self) const {
+  self->sendMatrixRows(handle);
 }
 
 void NewMatrixCommand::run(Worker *self) const {

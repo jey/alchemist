@@ -168,9 +168,12 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return (input.readLong(), input.readLong().toInt)
   }
 
-  def getIndexedRowMatrixStart(mat: MatrixHandle) = {
+  // layout maps each partition to a worker id (so has length number of partitions in the spark matrix being retrieved)
+  def getIndexedRowMatrixStart(mat: MatrixHandle, layout: Array[WorkerId]) = {
     output.writeInt(0x4)
     output.writeInt(mat.id)
+    output.writeLong(layout.length)
+    layout.map(w => output.writeInt(w.id))
     output.flush()
     if(input.readInt() != 0x1) {
       throw new ProtocolError()
