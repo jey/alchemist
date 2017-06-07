@@ -263,8 +263,6 @@ struct WorkerClientRecieveHandler {
               // partitionComplete
               partitionsCompleted++;
               pos = 0;
-            } else {
-              abort();
             }
           }
         }
