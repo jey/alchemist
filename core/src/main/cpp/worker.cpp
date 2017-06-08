@@ -90,7 +90,7 @@ struct WorkerClientSendHandler {
   // sends 0x3 code (uint32), then matrix handle (uint32), then row index (long = uint64_t)
   // localDataTranspose is a matrix each of whose columns is a row of the distributed matrix stored locally
   WorkerClientSendHandler(int sock, MatrixHandle handle, const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose) :
-    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(localDataTranspose->Height() * 8), inpos(0), outpos(0), 
+    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(4 + localDataTranspose->Height() * 8), inpos(0), outpos(0),
     localRowIndices(localRowIndices), localDataTranspose(localDataTranspose), handle(handle) {
   }
 
@@ -99,7 +99,7 @@ struct WorkerClientSendHandler {
   }
 
   // note this is never used! (it should be, to remove the client from the set of clients being polled once the operation on that client is done 
-  bool isFinished() const {
+  bool isClosed() const {
     return sock == -1;
   }
 
@@ -113,13 +113,20 @@ struct WorkerClientSendHandler {
     mpi::communicator world;
     int rowsCompleted = 0;
 
-    if(revents & POLLIN) {
-      while(true) {
+    // handle reads
+    if(revents & POLLIN && pollEvents & POLLIN) {
+      while(!isClosed()) {
         int count = recv(sock, &inbuf[inpos], inbuf.size() - inpos, 0);
+        //std::cerr << format("%s: read: sock=%s, inbuf=%s, inpos=%s, count=%s\n")
+        //    % world.rank() % sock % inbuf.size() % inpos % count;
         if (count == 0) {
           break;
         } else if( count == -1) {
-          if(errno == EAGAIN || errno == EINTR) {
+          if(errno == EAGAIN) {
+            // no more input available until next POLLIN
+            break;
+          } else if(errno == EINTR) {
+            // interrupted (e.g. by signal), so try again
             continue;
           } else if(errno == ECONNRESET) {
             close();
@@ -143,8 +150,9 @@ struct WorkerClientSendHandler {
               uint64_t rowIdx = ntohll(*(uint64_t*)dataPtr);
               dataPtr += 8;
               uint64_t localRowOffset = localRowIndices[rowIdx];
-              memcpy( &outbuf, (void *) (localDataTranspose->LockedBuffer() + 
-                    localDataTranspose->Height()*localRowOffset), localDataTranspose->Height()*8);
+              *reinterpret_cast<uint32_t*>(&outbuf[0]) = htonl(localDataTranspose->Height() * 8);
+              memcpy(&outbuf[4], (void *) (localDataTranspose->LockedBuffer() +
+                  localDataTranspose->Height()*localRowOffset), localDataTranspose->Height() * 8);
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
               break;
@@ -152,19 +160,29 @@ struct WorkerClientSendHandler {
               // partition completed
               rowsCompleted++;
               close();
+              break;
             }
           }
         }
       }
-    } else if(revents & POLLOUT) {
+    }
+
+    // handle writes
+    if(revents & POLLOUT && pollEvents & POLLOUT) {
       // a la https://stackoverflow.com/questions/12170037/when-to-use-the-pollout-event-of-the-poll-c-function
       // and http://www.kegel.com/dkftpbench/nonblocking.html
-      while(true) {
+      while(!isClosed()) {
         int count = write(sock, &outbuf[outpos], outbuf.size() - outpos);
+        //std::cerr << format("%s: write: sock=%s, outbuf=%s, outpos=%s, count=%s\n")
+        //    % world.rank() % sock % outbuf.size() % outpos % count;
         if (count == 0) {
           break; 
         } else if(count == -1) {
-          if(errno == EAGAIN || errno == EINTR) {
+          if(errno == EAGAIN) {
+            // out buffer is full for now, wait for next POLLOUT
+            break;
+          } else if(errno == EINTR) {
+            // interrupted (e.g. by signal), so try again
             continue;
           } else if(errno == ECONNRESET) {
             close();
@@ -186,7 +204,7 @@ struct WorkerClientSendHandler {
       }
     }
 
-  return rowsCompleted;
+    return rowsCompleted;
   }
 };
 
@@ -207,7 +225,7 @@ struct WorkerClientRecieveHandler {
     close();
   }
 
-  bool isFinished() const {
+  bool isClosed() const {
     return sock == -1;
   }
 
@@ -220,13 +238,16 @@ struct WorkerClientRecieveHandler {
   int handleEvent(short revents) {
     mpi::communicator world;
     int partitionsCompleted = 0;
-    if(revents & POLLIN) {
-      while(true) {
+    if(revents & POLLIN && pollEvents & POLLIN) {
+      while(!isClosed()) {
         int count = recv(sock, &inbuf[pos], inbuf.size() - pos, 0);
         if(count == 0) {
           break;
         } else if(count == -1) {
-          if(errno == EAGAIN || errno == EINTR) {
+          if(errno == EAGAIN) {
+            // no more input available until next POLLIN
+            break;
+          } else if(errno == EINTR) {
             continue;
           } else if(errno == ECONNRESET) {
             close();
@@ -281,7 +302,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &la
     pfds.clear();
     for(auto it = clients.begin(); it != clients.end();) {
       const auto &client = *it;
-      if(client->isFinished()) {
+      if(client->isClosed()) {
         it = clients.erase(it);
       } else {
         pfds.push_back(pollfd{client->sock, client->pollEvents});
@@ -324,7 +345,7 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId
     pfds.clear();
     for(auto it = clients.begin(); it != clients.end();) {
       const auto &client = *it;
-      if(client->isFinished()) {
+      if(client->isClosed()) {
         it = clients.erase(it);
       } else {
         pfds.push_back(pollfd{client->sock, client->pollEvents});

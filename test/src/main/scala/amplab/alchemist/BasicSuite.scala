@@ -22,6 +22,9 @@ object BasicSuite {
     val alB = AlMatrix(al, rddB)
     val alC = al.matMul(alA, alB)
     val res = alC.getIndexedRowMatrix()
+    assert(res.numRows == rddA.numRows)
+    assert(res.numCols == rddB.numCols)
+    // TODO: check values of result matrix
     al.stop
     sc.stop
   }
