@@ -14,8 +14,8 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     // should map the rows back to the executors using locality information if possible
     // otherwise shuffle the rows on the MPI side before sending them back to SPARK
     val numPartitions = max(al.sc.defaultParallelism, al.client.workerCount)
-    val sacrificialRDD = al.sc.parallelize(1 to numRows.toInt, numPartitions)
-    val layout : Array[WorkerId] = (1 to sacrificialRDD.partitions.size).map(x => new WorkerId(x % al.client.workerCount)).toArray
+    val sacrificialRDD = al.sc.parallelize(0 until numRows.toInt, numPartitions)
+    val layout : Array[WorkerId] = (0 until sacrificialRDD.partitions.size).map(x => new WorkerId(x % al.client.workerCount)).toArray
 
     // capture references needed by the closure without capturing `this.al`
     val ctx = al.context
