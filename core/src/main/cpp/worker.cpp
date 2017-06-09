@@ -33,6 +33,11 @@ void MatrixMulCommand::run(Worker *self) const {
   DistMatrix * matrix = new El::DistMatrix<double, El::MC, El::STAR>(m, n, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
+  if (self->peers.rank() == 0) {
+    El::Display(*self->matrices[inputA], "A:");
+    El::Display(*self->matrices[inputB], "B:");
+    El::Display(*matrix, "A*B:");
+  }
   self->world.barrier();
 }
 
@@ -156,12 +161,7 @@ struct WorkerClientSendHandler {
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
               break;
-            } else if(typeCode == 0x4) {
-              // partition completed
-              rowsCompleted++;
-              close();
-              break;
-            }
+            } 
           }
         }
       }
@@ -196,6 +196,7 @@ struct WorkerClientSendHandler {
           outpos += count;
           ENSURE(outpos <= outbuf.size());
           if (outpos == outbuf.size()) { // after sending the row, wait for the next request
+            rowsCompleted += 1;
             outpos = 0;
             pollEvents = POLLIN;
             break;

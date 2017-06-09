@@ -150,6 +150,11 @@ void Driver::handle_getMatrixRows() {
   MatrixGetRowsCommand cmd(handle, layout);
   issue(cmd);
 
+//  std::cerr << "Layout for returning matrix: " << std::endl;
+//  for (auto i = layout.begin(); i != layout.end(); ++i)
+//    std::cerr << *i << " ";
+//  std::cerr << std::endl;
+
   // tell Spark to start asking for rows
   output.writeInt(0x1);
   output.flush();

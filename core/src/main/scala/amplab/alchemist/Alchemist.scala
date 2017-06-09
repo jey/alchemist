@@ -76,6 +76,7 @@ class WorkerClient(val hostname: String, val port: Int) {
   }
 
   def getIndexedRowMatrix_partitionComplete(handle: MatrixHandle) = {
+    println(s"Finished getting rows on worker")
     output.writeInt(0x4) // typeCode = doneGettingRows
     output.flush()
   }
