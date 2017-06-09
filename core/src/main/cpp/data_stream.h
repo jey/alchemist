@@ -19,8 +19,8 @@ inline double ntohd(uint64_t qword) {
 
 inline uint64_t htond(double value) {
   DoubleBytes d;
-  d.value = htonll(value);
-  return d.qword;
+  d.value = value;
+  return htonll(d.qword);
 }
 
 struct DataInputStream {
