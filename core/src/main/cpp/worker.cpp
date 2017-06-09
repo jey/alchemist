@@ -156,12 +156,7 @@ struct WorkerClientSendHandler {
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
               break;
-            } else if(typeCode == 0x4) {
-              // partition completed
-              rowsCompleted++;
-              close();
-              break;
-            }
+            } 
           }
         }
       }
@@ -196,6 +191,7 @@ struct WorkerClientSendHandler {
           outpos += count;
           ENSURE(outpos <= outbuf.size());
           if (outpos == outbuf.size()) { // after sending the row, wait for the next request
+            rowsCompleted += 1;
             outpos = 0;
             pollEvents = POLLIN;
             break;

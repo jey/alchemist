@@ -38,10 +38,11 @@ object BasicSuite {
     val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
     println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
 
-    // visually check that sending/receiving matrices works
-    // currently, NO
-    displayBDM(toLocalMatrix(alMatB.getIndexedRowMatrix()))
-    displayBDM(toLocalMatrix(sparkMatB))
+    // check that sending/receiving matrices works
+    println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
+    println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
+    displayBDM(alResLocalMat)
+    displayBDM(sparkLocalMat)
     al.stop
     sc.stop
   }

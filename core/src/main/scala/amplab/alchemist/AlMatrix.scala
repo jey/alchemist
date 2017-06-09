@@ -16,18 +16,19 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     val numPartitions = max(al.sc.defaultParallelism, al.client.workerCount)
     val sacrificialRDD = al.sc.parallelize(0 until numRows.toInt, numPartitions)
     val layout : Array[WorkerId] = (0 until sacrificialRDD.partitions.size).map(x => new WorkerId(x % al.client.workerCount)).toArray
-
+    val full_layout : Array[WorkerId] = (layout zip sacrificialRDD.mapPartitions(iter => Iterator.single(iter.size), true).collect()).
+                                          flatMap{ case (workerid, partitionSize) => Array.fill(partitionSize)(workerid) }
     // capture references needed by the closure without capturing `this.al`
     val ctx = al.context
     val handle = this.handle
 
-    al.client.getIndexedRowMatrixStart(handle, layout)
+    al.client.getIndexedRowMatrixStart(handle, full_layout)
     val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
       val worker = ctx.connectWorker(layout(idx))
       val result  = rowindices.toList.map { rowIndex => 
         new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex))
       }.iterator
-      worker.getIndexedRowMatrix_partitionComplete(handle)
+//      worker.getIndexedRowMatrix_partitionComplete(handle)
       worker.close()
       result
     }, preservesPartitioning=true)
