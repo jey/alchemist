@@ -41,7 +41,9 @@ object BasicSuite {
     // check that sending/receiving matrices works
     println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
     println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
+    println("alResLocalMat:")
     displayBDM(alResLocalMat)
+    println("sparkLocalMat:")
     displayBDM(sparkLocalMat)
     al.stop
     sc.stop
@@ -51,7 +53,7 @@ object BasicSuite {
     val numRows = mat.numRows.toInt
     val numCols = mat.numCols.toInt
     val res = BDM.zeros[Double](numRows, numCols)
-    mat.rows.collect.foreach{ indexedRow => res(indexedRow.index.toInt - 1, ::) := BDV(indexedRow.vector.toArray).t }
+    mat.rows.collect.foreach{ indexedRow => res(indexedRow.index.toInt, ::) := BDV(indexedRow.vector.toArray).t }
     res
   }
 
@@ -62,7 +64,7 @@ object BasicSuite {
 
   def deterministicMatrix(sc: SparkContext, numRows: Int, numCols: Int): IndexedRowMatrix = {
     val mat = BDM.zeros[Double](numRows, numCols) 
-    (0 until min(numRows, numCols)).foreach { i : Int => mat(i, i) = i }
+    (0 until min(numRows, numCols)).foreach { i : Int => mat(i, i) = i + 1}
     val rows = sc.parallelize( (0 until numRows).map( i => mat(i, ::).t.toArray )).zipWithIndex
     new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, new DenseVector(x._1))))
   }

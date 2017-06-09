@@ -54,7 +54,7 @@ class WorkerClient(val hostname: String, val port: Int) {
     output.writeInt(0x1)  // typeCode = addRow
     output.writeInt(handle.id)
     output.writeLong(rowIdx)
-    output.writeLong(vals.length)
+    output.writeLong(vals.length * 8)
     for(v <- vals) {
       output.writeDouble(v)
     }

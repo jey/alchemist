@@ -6,6 +6,23 @@
 
 namespace alchemist {
 
+union DoubleBytes {
+  uint64_t qword;
+  double value;
+};
+
+inline double ntohd(uint64_t qword) {
+  DoubleBytes d;
+  d.qword = ntohll(qword);
+  return d.value;
+}
+
+inline uint64_t htond(double value) {
+  DoubleBytes d;
+  d.value = htonll(value);
+  return d.qword;
+}
+
 struct DataInputStream {
   std::istream &is;
 

@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <poll.h>
+#include "data_stream.h"
 
 namespace alchemist {
 
@@ -154,10 +155,12 @@ struct WorkerClientSendHandler {
               dataPtr += 4;
               uint64_t rowIdx = ntohll(*(uint64_t*)dataPtr);
               dataPtr += 8;
+              const auto numCols = localDataTranspose->Height();
               uint64_t localRowOffset = localRowIndices[rowIdx];
-              *reinterpret_cast<uint32_t*>(&outbuf[0]) = htonl(localDataTranspose->Height() * 8);
-              memcpy(&outbuf[4], (void *) (localDataTranspose->LockedBuffer() +
-                  localDataTranspose->Height()*localRowOffset), localDataTranspose->Height() * 8);
+              *reinterpret_cast<uint32_t*>(&outbuf[0]) = htonl(numCols * 8);
+              double *start = reinterpret_cast<double*>(&outbuf[4]);
+              memcpy(start, localDataTranspose->LockedBuffer() + numCols * localRowOffset, numCols * 8);
+              std::transform(start, start + numCols, start, htond);
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
               break;
@@ -273,13 +276,15 @@ struct WorkerClientRecieveHandler {
               uint64_t rowIdx = ntohll(*(uint64_t*)dataPtr);
               dataPtr += 8;
               ENSURE(rowIdx < (size_t)matrix->Height());
-              ENSURE(ntohll(*(uint64_t*)dataPtr) == numCols);
+              ENSURE(ntohll(*(uint64_t*)dataPtr) == numCols * 8);
               dataPtr += 8;
-              double *rowData = (double*)dataPtr;
               matrix->Reserve(numCols);
               for(size_t colIdx = 0; colIdx < numCols; ++colIdx) {
-                matrix->QueueUpdate(rowIdx, colIdx, rowData[colIdx]);
+                double value = ntohd(*(uint64_t*)dataPtr);
+                matrix->QueueUpdate(rowIdx, colIdx, value);
+                dataPtr += 8;
               }
+              ENSURE(dataPtr == &inbuf[inbuf.size()]);
               pos = 0;
             } else if(typeCode == 0x2) {
               // partitionComplete
