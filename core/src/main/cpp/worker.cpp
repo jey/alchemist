@@ -160,7 +160,8 @@ struct WorkerClientSendHandler {
               *reinterpret_cast<uint64_t*>(&outbuf[0]) = htonll(numCols * 8);
               double *start = reinterpret_cast<double*>(&outbuf[8]);
               memcpy(start, localDataTranspose->LockedBuffer() + numCols * localRowOffset, numCols * 8);
-              std::transform(start, start + numCols, start, htond);
+              uint64_t *startlong = reinterpret_cast<uint64_t*>(&outbuf[8]);
+              std::transform(start, start + numCols, startlong, htond);
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
               break;
