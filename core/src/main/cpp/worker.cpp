@@ -23,8 +23,8 @@ struct Worker {
   }
 
   void receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId> &layout);
-  void sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &layout, 
-      const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose);
+  void sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vector<WorkerId> &layout,
+      const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData);
   int main();
 };
 
@@ -49,22 +49,22 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
   uint64_t numCols = matrix->Width();
   matrix->ReservePulls(numRowsFromMe*numCols);
 
-  std::map<uint64_t, uint64_t> localRowIndices; // maps rows in the matrix to rows in the local storage
-  El::Matrix<double> localDataTranspose;
-  localDataTranspose.Resize(numCols, numRowsFromMe); // b/c Elemental uses column-major format
+  std::vector<uint64_t> localRowIndices; // maps rows in the matrix to rows in the local storage
+  std::vector<double> localData(numCols * numRowsFromMe);
 
+  localRowIndices.reserve(numRowsFromMe);
+  matrix->ReservePulls(numCols * numRowsFromMe);
   for(uint64_t curRowIdx = 0; localRowIndices.size() < numRowsFromMe; curRowIdx++) {
     if( layout[curRowIdx] == self->id ) {
-      auto cursize = localRowIndices.size();
-      localRowIndices[curRowIdx] = cursize;
+      localRowIndices.push_back(curRowIdx);
       for(uint64_t col = 0; col < numCols; col++) {
         matrix->QueuePull(curRowIdx, col);
       }
     }
   } 
-  matrix->ProcessPullQueue(localDataTranspose.Buffer());
+  matrix->ProcessPullQueue(&localData[0]);
 
-  self->sendMatrixRows(handle, layout, localRowIndices, &localDataTranspose);
+  self->sendMatrixRows(handle, matrix->Width(), layout, localRowIndices, localData);
   self->world.barrier();
 }
 
@@ -88,16 +88,17 @@ struct WorkerClientSendHandler {
   std::vector<char> outbuf;
   size_t inpos;
   size_t outpos;
-  std::map<uint64_t, uint64_t> localRowIndices;
-  const El::Matrix<double> * localDataTranspose;
+  const std::vector<uint64_t> &localRowIndices;
+  const std::vector<double> &localData;
   MatrixHandle handle;
+  const size_t numCols;
 
   // only set POLLOUT when have data to send
   // sends 0x3 code (uint32), then matrix handle (uint32), then row index (long = uint64_t)
-  // localDataTranspose is a matrix each of whose columns is a row of the distributed matrix stored locally
-  WorkerClientSendHandler(int sock, MatrixHandle handle, const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose) :
-    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(8 + localDataTranspose->Height() * 8), inpos(0), outpos(0),
-    localRowIndices(localRowIndices), localDataTranspose(localDataTranspose), handle(handle) {
+  // localData contains the rows of localRowIndices in order
+  WorkerClientSendHandler(int sock, MatrixHandle handle, size_t numCols, const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData) :
+    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(8 + numCols * 8), inpos(0), outpos(0),
+    localRowIndices(localRowIndices), localData(localData), handle(handle), numCols(numCols) {
   }
 
   ~WorkerClientSendHandler() {
@@ -155,13 +156,17 @@ struct WorkerClientSendHandler {
               dataPtr += 4;
               uint64_t rowIdx = ntohll(*(uint64_t*)dataPtr);
               dataPtr += 8;
-              const auto numCols = localDataTranspose->Height();
-              uint64_t localRowOffset = localRowIndices[rowIdx];
+              auto localRowOffsetIter = std::find(localRowIndices.begin(), localRowIndices.end(), rowIdx);
+              ENSURE(localRowOffsetIter != localRowIndices.end());
+              auto localRowOffset = localRowOffsetIter - localRowIndices.begin();
               *reinterpret_cast<uint64_t*>(&outbuf[0]) = htonll(numCols * 8);
-              double *start = reinterpret_cast<double*>(&outbuf[8]);
-              memcpy(start, localDataTranspose->LockedBuffer() + numCols * localRowOffset, numCols * 8);
-              uint64_t *startlong = reinterpret_cast<uint64_t*>(&outbuf[8]);
-              std::transform(start, start + numCols, startlong, htond);
+              // treat the output as uint64_t[] instead of double[] to avoid type punning issues with htonll
+              auto invals = reinterpret_cast<const uint64_t*>(&localData[numCols * localRowOffset]);
+              auto outvals = reinterpret_cast<uint64_t*>(&outbuf[8]);
+              for(uint64_t idx = 0; idx < numCols; ++idx) {
+                // can't use std::transform since htonll is a macro (on macOS)
+                outvals[idx] = htonll(invals[idx]);
+              }
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
               break;
@@ -300,8 +305,8 @@ struct WorkerClientRecieveHandler {
   }
 };
 
-void Worker::sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &layout,
-    const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose) {
+void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vector<WorkerId> &layout,
+    const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData) {
   auto numRowsFromMe = std::count(layout.begin(), layout.end(), this->id);
   std::vector<std::unique_ptr<WorkerClientSendHandler>> clients;
   std::vector<pollfd> pfds;
@@ -332,7 +337,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, const std::vector<WorkerId> &la
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
           ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
-          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, handle, localRowIndices, localDataTranspose));
+          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, handle, numCols, localRowIndices, localData));
           clients.push_back(std::move(client));
         } else {
           ENSURE(clients[idx]->sock == curSock); // how could this not be the case?
