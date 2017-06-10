@@ -31,7 +31,7 @@ struct Worker {
 void MatrixMulCommand::run(Worker *self) const {
   auto m = self->matrices[inputA]->Height();
   auto n = self->matrices[inputB]->Width();
-  DistMatrix * matrix = new El::DistMatrix<double, El::MC, El::STAR>(m, n, self->grid);
+  DistMatrix * matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, n, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
   El::Display(*self->matrices[inputA], "A:");
@@ -66,7 +66,7 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 }
 
 void NewMatrixCommand::run(Worker *self) const {
-  DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::STAR>(numRows, numCols, self->grid);
+  DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(numRows, numCols, self->grid);
   Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   self->receiveMatrixBlocks(handle, layout);
