@@ -3,6 +3,6 @@ brew install cmake
 brew install boost-mpi
 cd Elemental
 git checkout 0.87
-CC=gcc-7 CXX=g++-7 FC=gfortran-6 cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/proj/alchemist/bins ..
+CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/proj/alchemist/bins ..
 nice make -j8
 make install

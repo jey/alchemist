@@ -15,10 +15,10 @@ object BasicSuite {
     val al = new Alchemist(sc)
     System.err.println("test: done creating alchemist")
 //    val sparkMatA = randomMatrix(sc, 300, 500)
-    val sparkMatA = deterministicMatrix(sc, 30, 50)
+    val sparkMatA = deterministicMatrix(sc, 30, 50, 1)
     sparkMatA.rows.cache
 //    val sparkMatB = randomMatrix(sc, 500, 200)
-    val sparkMatB = deterministicMatrix(sc, 50, 20)
+    val sparkMatB = deterministicMatrix(sc, 50, 20, 10)
     sparkMatB.rows.cache
 
     // Spark matrix multiply
@@ -62,9 +62,9 @@ object BasicSuite {
     (0 until mat.rows).foreach{ i => println(mat(i, ::).t.toArray.mkString(" ")) }
   }
 
-  def deterministicMatrix(sc: SparkContext, numRows: Int, numCols: Int): IndexedRowMatrix = {
+  def deterministicMatrix(sc: SparkContext, numRows: Int, numCols: Int, scale: Double): IndexedRowMatrix = {
     val mat = BDM.zeros[Double](numRows, numCols) 
-    (0 until min(numRows, numCols)).foreach { i : Int => mat(i, i) = i + 1}
+    (0 until min(numRows, numCols)).foreach { i : Int => mat(i, i) = scale * (i + 1)}
     val rows = sc.parallelize( (0 until numRows).map( i => mat(i, ::).t.toArray )).zipWithIndex
     new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, new DenseVector(x._1))))
   }

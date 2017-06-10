@@ -34,11 +34,9 @@ void MatrixMulCommand::run(Worker *self) const {
   DistMatrix * matrix = new El::DistMatrix<double, El::MC, El::STAR>(m, n, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
-  if (self->peers.rank() == 0) {
-    El::Display(*self->matrices[inputA], "A:");
-    El::Display(*self->matrices[inputB], "B:");
-    El::Display(*matrix, "A*B:");
-  }
+  El::Display(*self->matrices[inputA], "A:");
+  El::Display(*self->matrices[inputB], "B:");
+  El::Display(*matrix, "A*B:");
   self->world.barrier();
 }
 
@@ -47,7 +45,6 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
   uint64_t numRowsFromMe = std::count(layout.begin(), layout.end(), self->id);
   auto matrix = self->matrices[handle].get();
   uint64_t numCols = matrix->Width();
-  matrix->ReservePulls(numRowsFromMe*numCols);
 
   std::vector<uint64_t> localRowIndices; // maps rows in the matrix to rows in the local storage
   std::vector<double> localData(numCols * numRowsFromMe);
