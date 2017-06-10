@@ -67,6 +67,7 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 
 void NewMatrixCommand::run(Worker *self) const {
   DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::STAR>(numRows, numCols, self->grid);
+  Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   self->receiveMatrixBlocks(handle, layout);
   self->peers.barrier();
