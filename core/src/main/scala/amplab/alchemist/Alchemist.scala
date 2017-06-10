@@ -6,7 +6,7 @@ import scala.util.Random
 import java.io.{
     InputStream, OutputStream,
     DataInputStream => JDataInputStream,
-    DataOutputStream
+    DataOutputStream => JDataOutputStream
 }
 import java.nio.{
     DoubleBuffer, ByteBuffer
@@ -14,25 +14,37 @@ import java.nio.{
 import java.nio.charset.StandardCharsets
 
 class DataInputStream(istream: InputStream) extends JDataInputStream(istream) {
+  def readArrayLength(): Int = {
+    val result = readLong()
+    assert(result.toInt == result)
+    return result.toInt
+  }
+
   def readBuffer(): Array[Byte] = {
-    val buf = new Array[Byte](readInt())
+    val buf = new Array[Byte](readArrayLength())
     read(buf)
     buf
   }
 
   def readDoubleArray(): Array[Double] = {
-    // http://www.scala-lang.org/old/node/11002
-    // maybe this code is inefficient; can make more efficient using
-    // platform dependent (endianness) code?
-    // is there not a fast readDouble() primitive in JDataInputStream?
-    val buf = readBuffer()
-    val dbuf = DoubleBuffer.allocate(buf.length/8)
-    dbuf.put(ByteBuffer.wrap(buf).asDoubleBuffer)
-    dbuf.array
+    val bufLen = readArrayLength()
+    assert(bufLen % 8 == 0);
+    val buf = new Array[Double](bufLen / 8);
+    for(i <- 0 until bufLen / 8) {
+      buf(i) = readDouble()
+    }
+    return buf
   }
 
   def readString(): String = {
     new String(readBuffer(), StandardCharsets.US_ASCII)
+  }
+}
+
+class DataOutputStream(ostream: OutputStream) extends JDataOutputStream(ostream) {
+  def writeDoubleArray(buf: Array[Double]): Unit = {
+    writeLong(buf.length * 8)
+    buf.foreach(writeDouble)
   }
 }
 
@@ -54,10 +66,7 @@ class WorkerClient(val hostname: String, val port: Int) {
     output.writeInt(0x1)  // typeCode = addRow
     output.writeInt(handle.id)
     output.writeLong(rowIdx)
-    output.writeLong(vals.length * 8)
-    for(v <- vals) {
-      output.writeDouble(v)
-    }
+    output.writeDoubleArray(vals)
     output.flush()
   }
 

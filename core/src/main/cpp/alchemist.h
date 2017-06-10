@@ -18,7 +18,8 @@
 #ifndef NDEBUG
 #define ENSURE(x) assert(x)
 #else
-#define ENSURE(x) do { if(!(x)) abort(); } while(0)
+#define ENSURE(x) do { if(!(x)) { \
+  fprintf(stderr, "FATAL: invariant violated: %s:%d: %s\n", __FILE__, __LINE__, #x); fflush(stderr); abort(); } while(0)
 #endif
 
 namespace alchemist {

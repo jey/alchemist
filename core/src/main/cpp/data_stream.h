@@ -79,7 +79,7 @@ struct DataOutputStream {
   }
 
   void writeString(const std::string &s) {
-    writeInt(s.size());
+    writeLong(s.size());
     os.write(&s[0], s.size());
     if(!os) throw IOError();
   }

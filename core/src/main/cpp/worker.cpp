@@ -96,7 +96,7 @@ struct WorkerClientSendHandler {
   // sends 0x3 code (uint32), then matrix handle (uint32), then row index (long = uint64_t)
   // localDataTranspose is a matrix each of whose columns is a row of the distributed matrix stored locally
   WorkerClientSendHandler(int sock, MatrixHandle handle, const std::map<uint64_t, uint64_t> &localRowIndices, const El::Matrix<double> * localDataTranspose) :
-    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(4 + localDataTranspose->Height() * 8), inpos(0), outpos(0),
+    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(8 + localDataTranspose->Height() * 8), inpos(0), outpos(0),
     localRowIndices(localRowIndices), localDataTranspose(localDataTranspose), handle(handle) {
   }
 
@@ -157,8 +157,8 @@ struct WorkerClientSendHandler {
               dataPtr += 8;
               const auto numCols = localDataTranspose->Height();
               uint64_t localRowOffset = localRowIndices[rowIdx];
-              *reinterpret_cast<uint32_t*>(&outbuf[0]) = htonl(numCols * 8);
-              double *start = reinterpret_cast<double*>(&outbuf[4]);
+              *reinterpret_cast<uint64_t*>(&outbuf[0]) = htonll(numCols * 8);
+              double *start = reinterpret_cast<double*>(&outbuf[8]);
               memcpy(start, localDataTranspose->LockedBuffer() + numCols * localRowOffset, numCols * 8);
               std::transform(start, start + numCols, start, htond);
               inpos = 0;

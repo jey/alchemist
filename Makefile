@@ -6,7 +6,7 @@ default:
 .PHONY: build
 build:
 	$(MAKE) -C core
-	sbt assembly
+	sbt -batch assembly
 
 .PHONY:
 check:
@@ -16,4 +16,4 @@ check:
 .PHONY: clean
 clean:
 	$(MAKE) -C core clean
-	sbt clean
+	sbt -batch clean
