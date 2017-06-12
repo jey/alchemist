@@ -321,7 +321,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
     }
     pfds.push_back(pollfd{listenSock, POLLIN}); // must be last entry 
     int count = poll(&pfds[0], pfds.size(), -1);
-    if(count == -1 && (errno = EAGAIN || errno == EINTR)) continue;
+    if(count == -1 && (errno == EAGAIN || errno == EINTR)) continue;
     ENSURE(count != -1);
     for(size_t idx=0; idx < pfds.size() && count > 0; ++idx) {
       auto curSock = pfds[idx].fd;
@@ -338,7 +338,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
           std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, handle, numCols, localRowIndices, localData));
           clients.push_back(std::move(client));
         } else {
-          ENSURE(clients[idx]->sock == curSock); // how could this not be the case?
+          ENSURE(clients[idx]->sock == curSock);
           numRowsFromMe -= clients[idx]->handleEvent(revents);
         }
       }
