@@ -200,10 +200,12 @@ void Driver::handle_kmeansClustering() {
   uint32_t numIters = 0;
 
   uint32_t command = 1; // do another iteration
-  while (percentMoved > changeThreshold && ++numIters < maxnumIters)  {
+  while (percentMoved > changeThreshold && numIters++ < maxnumIters)  {
     numChanged = 0;
     mpi::broadcast(world, command, 0);
-    mpi::reduce(world, numChanged, std::plus<int>(), 0);
+    std::cerr << "about to reduce\n";
+    uint32_t mychanged = 0;
+    mpi::reduce(world, mychanged, numChanged, std::plus<int>(), 0);
     percentMoved = ((double) numChanged)/n;
     std::cerr << format("driver: on iteration %d of Lloyd's algorithm, %f percentage changed\n") % numIters % percentMoved;
   }

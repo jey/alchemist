@@ -33,7 +33,7 @@ object BasicSuite {
     //displayBDM(sparkLocalMat)
     
     // TEST: Alchemist matrix multiply
-    val alMatA = AlMatrix(al, sparkMatA)
+    //val alMatA = AlMatrix(al, sparkMatA)
     //val alMatB = AlMatrix(al, sparkMatB)
     //val alMatC = al.matMul(alMatA, alMatB)
     //val alRes = alMatC.getIndexedRowMatrix()
@@ -60,15 +60,21 @@ object BasicSuite {
     //val alMatATransposeLocalMat = toLocalMatrix(alMatATranspose.getIndexedRowMatrix())
     //println(norm((alMatATransposeLocalMat - toLocalMatrix(alMatA.getIndexedRowMatrix).t).toDenseVector))
 
+    // TEST: check k-means
+    val n : Int = 30;
+    val d : Int = 20;
     val k : Int = 5
     val maxIters : Int = 10
     val threshold : Double = 0.2
-    val (alCenters, alAssignments, numIters, percentageStable) = al.kMeans(alMatA, k, maxIters, threshold)
+    val (rowAssignments, matKMeans) = kmeansTestMatrix(sc, n, d, k) 
+    val alMatkMeans = AlMatrix(al, matKMeans)
+    val (alCenters, alAssignments, numIters, percentageStable) = al.kMeans(alMatkMeans, k, maxIters, threshold)
+
+    val alCentersLocalMat = toLocalMatrix(alCenters.getIndexedRowMatrix())
+    displayBDM(alCentersLocalMat)
+
     al.stop
     sc.stop
-
-    // TEST: check k-means
-
   }
 
   def toLocalMatrix(mat: IndexedRowMatrix) : BDM[Double] = {
@@ -94,5 +100,15 @@ object BasicSuite {
   def randomMatrix(sc: SparkContext, numRows: Int, numCols: Int): IndexedRowMatrix = {
     val rows = RandomRDDs.normalVectorRDD(sc, numRows, numCols, 128).zipWithIndex
     new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, x._1)))
+  }
+
+  def kmeansTestMatrix(sc : SparkContext, numRows : Int, numCols: Int, numCenters: Int) : Tuple2[Array[Int], IndexedRowMatrix] = {
+    assert(numCols >= numCenters)
+    val rowAssignments = Array.fill(numRows)(scala.util.Random.nextInt(numCenters))
+    val mat = BDM.zeros[Double](numRows, numCols)
+    (0 until numRows).foreach{ i : Int => mat(i, rowAssignments(i)) = numCols }
+    val rows = sc.parallelize( (0 until numRows).map( i => mat(i, ::).t.toArray )).zipWithIndex
+    val indexedMat = new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, new DenseVector(x._1))))
+    (rowAssignments, indexedMat)
   }
 }

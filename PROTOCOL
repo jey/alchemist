@@ -64,3 +64,16 @@ Block transfer protocol of AlWorker:
   uint64_t rowIdx
   uint64_t numCols
   double rowData[numCols]
+
+###
+alchemist:
+	use locality
+	figure out how to force persistence of cached RDDs returned from Alchemist (to avoid replay -- maybe make it persist to disk in the worst case)
+	allow freeing of matrices on the RDD and alchemist sides
+	need logging system for better debugging and profiling (other than println to console)
+	allow AlMatrices to be reshuffled internally (e.g. to row-wise distributions for kmeans)
+	need to have more extensible way of adding to library functionality (e.g. a separate header for each lib we link against, and use strings for operations instead of hexs, since easier to make unique, e.g. "elemental/thinSVD" instead of 0x5)
+	support returning vectors (of ints as well, e.g. for kmeans cluster assignments)
+	support returning vector/matrices direct to driver (again e.g. for kmeans), gathering to Alchemist driver first if not already there (to avoid collects on Spark side)
+	have better way to track the distributed (and new driver only) matrices/vectors/objects more generally, in the Alchemist driver
+	more formal testing framework w/ unit tests, extensible for new functions, etc.

@@ -6,3 +6,4 @@ git checkout 0.87
 CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/proj/alchemist/bins ..
 nice make -j8
 make install
+# install Eigen3 by copying just the Eigen subdirectory to $HOME/proj/alchemist/bins/include

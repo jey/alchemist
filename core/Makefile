@@ -1,12 +1,14 @@
 ifdef ALPREFIX
   EL_PATH ?= $(ALPREFIX)
+  EIGEN_PATH ?= $(ALPREFIX)/include
 endif
 EL_PATH ?= $(CURDIR)/../../bins
+EIGEN_PATH ?= $(CURDIR)/../../bins/include
 include $(EL_PATH)/conf/ElVars
 
 SRC_PATH = src/main
 
-CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused
+CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH)
 #CXXFLAGS += -O0
 LDFLAGS += $(EL_LINK_FLAGS) -Wl,-rpath,$(EL_LIB) $(EL_LIBS)
 LDFLAGS += -lboost_serialization -lboost_mpi

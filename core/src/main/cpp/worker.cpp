@@ -32,14 +32,19 @@ struct Worker {
 };
 
 void KMeansCommand::run(Worker *self) const {
-  // TODO: pretty sure these are NOT row distributed matrices, nor are the inputs, so need to
-  // copy and relayout input matrices and change the layouts of the centers/assignments matrices
-  auto dataMat = self->matrices[origMat].get();
-  auto n = dataMat->Height();
-  auto d = dataMat->Width();
+  // TODO: use Eigen for local matrix manipulations (Elemental's element-by-element manipulations are tedious af)
+  auto origDataMat = self->matrices[origMat].get();
+  auto n = origDataMat->Height();
+  auto d = origDataMat->Width();
 
-  DistMatrix * centers = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(numCenters, d, self->grid);
-  DistMatrix * assignments = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, 1, self->grid);
+  // TODO: look into using Elemental's read proxies for potentially faster transparent relayouts
+  // btw, cf http://libelemental.org/pub/slides/ICS13.pdf slide 19 for the cost of redistribution
+  std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, d, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
+  DistMatrix * dataMat = dataMat_uniqptr.get();
+  El::Copy(*origDataMat, *dataMat); // relayout data so it is row-wise partitioned
+
+  DistMatrix * centers = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(numCenters, d, self->grid);
+  DistMatrix * assignments = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, 1, self->grid);
   El::Matrix<double> localCenters(numCenters, d);
   El::Gaussian(localCenters, numCenters, d);
 
@@ -47,10 +52,18 @@ void KMeansCommand::run(Worker *self) const {
   ENSURE(self->matrices.insert(std::make_pair(assignmentsHandle, std::unique_ptr<DistMatrix>(assignments))).second);
 
   // compute the map from local row indices to the row indices in the global matrix
+  std::stringstream strbuf;
+  strbuf << format("%s holds rows ") % self->world.rank();
+
   std::vector<El::Int> rowMap(dataMat->LocalHeight());
   for(El::Int rowIdx = 0; rowIdx < n; ++rowIdx) 
-    if (dataMat->IsLocalRow(rowIdx))
+    if (dataMat->IsLocalRow(rowIdx)) {
       rowMap[dataMat->LocalRow(rowIdx)] = rowIdx;
+      strbuf << dataMat->LocalRow(rowIdx) << ":" << rowIdx << " ";
+    }
+  strbuf << "\n";
+  std::cerr << strbuf.str();
+
 
   // compute the local cluster assignments
   std::unique_ptr<uint32_t[]> localCounts{new uint32_t[numCenters]};
@@ -71,6 +84,19 @@ void KMeansCommand::run(Worker *self) const {
     localCounts[localRowAssignments[localRowIdx]] += 1;
   }
 
+  strbuf.str() = "";
+  strbuf << format("%s local row assignments ") % self->world.rank();
+  for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx) {
+    strbuf << localRowIdx << ":" << localRowAssignments[localRowIdx] << " ";
+  }
+  strbuf << std::endl;
+  strbuf << format("%s local cluster counts ") % self->world.rank();
+  for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) {
+    strbuf << centerIdx << ":" << localCounts[centerIdx] << " ";
+  }
+  strbuf << std::endl;
+  std::cerr << strbuf.str();
+
   std::unique_ptr<double[]> bufOut{new double[numCenters*d]};
   std::unique_ptr<uint32_t[]> newLocalCounts{new uint32_t[numCenters]};
   uint32_t numChanged = 0;
@@ -82,15 +108,34 @@ void KMeansCommand::run(Worker *self) const {
     if (nextCommand == 0xf)  // finished iterating
       break;
 
+
+    strbuf.str() = "";
+    strbuf << format("On %s, pre-reduce cluster counts ") % self->world.rank();
+    for(uint32_t clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx) {
+      strbuf << clusterIdx << ":" << localCounts[clusterIdx] << " ";
+    }
+    strbuf << std::endl;
+
     // update the centers
+    // TODO: locally compute cluster sums and place in localCenters
     mpi::all_reduce(self->peers, localCenters.Buffer(), numCenters*d, 
         bufOut.get(), std::plus<double>());
     mpi::all_reduce(self->peers, localCounts.get(), numCenters, newLocalCounts.get(), std::plus<uint32_t>());
     std::memcpy(localCenters.Buffer(), bufOut.get(), numCenters*d*sizeof(double));
     std::memcpy(localCounts.get(), newLocalCounts.get(), numCenters*sizeof(uint32_t));
+
+    strbuf << format("On %s, post-reduce cluster counts ") % self->world.rank();
+    for(uint32_t clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx) {
+      strbuf << clusterIdx << ":" << localCounts[clusterIdx] << " ";
+    }
+    strbuf << std::endl;
+    std::cerr << strbuf.str() << std::flush;
+
     for(uint32_t rowIdx = 0; rowIdx < numCenters; ++rowIdx)
       for(El::Int colIdx = 0; colIdx < d; ++colIdx)
         localCenters.Set(rowIdx, colIdx, localCenters.Get(rowIdx, colIdx)/((double) localCounts[rowIdx]));
+
+    std::cerr << format("Here d\n");
 
     // compute new local assignments
     numChanged = 0;
@@ -111,19 +156,27 @@ void KMeansCommand::run(Worker *self) const {
       localCounts[assignedRow] += 1;
     }
 
+    std::cerr << format("Here e\n");
     // return the number of changed assignments
     mpi::reduce(self->world, numChanged, std::plus<int>(), 0);
+
+    std::cerr << format("Here f\n");
   }
 
+  std::cerr << format("Here g\n");
   // write the final k-means centers and assignments
+  El::Zero(*assignments);
+  assignments->Reserve(centers->LocalHeight());
   for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx)
-    assignments->Set(rowMap[localRowIdx], 1, localRowAssignments[localRowIdx]);
+    assignments->QueueUpdate(rowMap[localRowIdx], 0, localRowAssignments[localRowIdx]);
+  assignments->ProcessQueues();
 
+  std::cerr << format("Here h\n");
   El::Zero(*centers);
   centers->Reserve(centers->LocalHeight()*d);
-  for(El::Int clusterIdx = 0; clusterIdx < centers->Height(); ++clusterIdx)
+  for(El::Int clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx)
     if (centers->IsLocalRow(clusterIdx)) {
-      for(El::Int colIdx = 0; colIdx < centers->Width(); ++colIdx)
+      for(El::Int colIdx = 0; colIdx < d; ++colIdx)
         centers->QueueUpdate(clusterIdx, colIdx, localCenters.Get(clusterIdx, colIdx));
     }
   centers->ProcessQueues();
