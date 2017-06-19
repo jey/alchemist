@@ -147,7 +147,7 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     transposeHandle
   }
 
-  def kMeans(mat: MatrixHandle, k : Int, maxIters : Int, threshold: Double) : Tuple4[MatrixHandle, MatrixHandle, Int, Double] = {
+  def kMeans(mat: MatrixHandle, k : Int, maxIters : Int, threshold: Double) : Tuple6[MatrixHandle, MatrixHandle, Int, Double, Int, Int] = {
     output.writeInt(0x7)
     output.writeInt(mat.id)
     output.writeInt(k)
@@ -162,8 +162,10 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     val centersHandle = new MatrixHandle(input.readInt())
     val numIters = input.readInt()
     val percentageStable = input.readDouble()
+    val restarts = input.readInt()
+    val totalIters = input.readInt()
 
-    (centersHandle, assignmentsHandle, numIters, percentageStable)
+    (centersHandle, assignmentsHandle, numIters, percentageStable, restarts, totalIters)
   }
 
   def matrixSVDStart(mat: MatrixHandle) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
@@ -320,9 +322,9 @@ class Alchemist(val mysc: SparkContext) {
     (Umat, Smat, Vmat)
   }
 
-  def kMeans(mat: AlMatrix, k: Int, maxIters: Int, threshold: Double) : Tuple4[AlMatrix, AlMatrix, Int, Double] = {
-    val (handleCenters, handleAssignments, numIters, stablePercentage) = client.kMeans(mat.handle, k, maxIters, threshold)
-    (new AlMatrix(this, handleCenters), new AlMatrix(this, handleAssignments), numIters, stablePercentage)
+  def kMeans(mat: AlMatrix, k: Int, maxIters: Int, threshold: Double) : Tuple6[AlMatrix, AlMatrix, Int, Double, Int, Int] = {
+    val (handleCenters, handleAssignments, numIters, stablePercentage, restarts, totalIters) = client.kMeans(mat.handle, k, maxIters, threshold)
+    (new AlMatrix(this, handleCenters), new AlMatrix(this, handleAssignments), numIters, stablePercentage, restarts, totalIters)
   }
 
 }

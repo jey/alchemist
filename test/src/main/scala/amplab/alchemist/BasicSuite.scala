@@ -68,13 +68,24 @@ object BasicSuite {
     val threshold : Double = 0.2
     val (rowAssignments, matKMeans) = kmeansTestMatrix(sc, n, d, k) 
     val alMatkMeans = AlMatrix(al, matKMeans)
-    val (alCenters, alAssignments, numIters, percentageStable) = al.kMeans(alMatkMeans, k, maxIters, threshold)
+    val (alCenters, alAssignments, numIters, percentageStable, restarts, totalIters) = al.kMeans(alMatkMeans, k, maxIters, threshold)
 
     val alCentersLocalMat = toLocalMatrix(alCenters.getIndexedRowMatrix())
-    displayBDM(alCentersLocalMat)
+    val alAssignmentsLocalMat = toLocalMatrix(alAssignments.getIndexedRowMatrix())
+    displayBDM(alCenters.getIndexedRowMatrix())
+    println(rowAssignments.groupBy(_ + 0).mapValues(_.length).toList)
+    println(alAssignmentsLocalMat.data.groupBy(_ + 0).mapValues(_.length).toList)
 
     al.stop
     sc.stop
+  }
+
+  implicit def arrayofIntsToLocalMatrix(arr: Array[Int]) : BDM[Double] = {
+    new BDM(arr.length, 1, arr.toList.map(_.toDouble).toArray)
+  }
+
+  implicit def indexedRowMatrixToLocalMatrix(mat: IndexedRowMatrix) : BDM[Double] = {
+    toLocalMatrix(mat)
   }
 
   def toLocalMatrix(mat: IndexedRowMatrix) : BDM[Double] = {

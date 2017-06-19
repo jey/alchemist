@@ -244,6 +244,8 @@ void Driver::handle_kmeansClustering() {
   output.writeInt(centersHandle.id);
   output.writeInt(numIters);
   output.writeDouble(1-percentMoved);
+  output.writeInt(restarts);
+  output.writeInt(totalIters);
   output.flush();
 }
 
