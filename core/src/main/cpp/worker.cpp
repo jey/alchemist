@@ -1,4 +1,5 @@
 #include "alchemist.h"
+
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
@@ -7,6 +8,9 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+
+using Eigen::MatrixXd;
+using Eigen::VectorXd;
 
 namespace alchemist {
 
@@ -31,8 +35,30 @@ struct Worker {
   int main();
 };
 
+uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & centers, 
+    uint32_t * clusterSizes, std::vector<uint32_t> & rowAssignments) {
+  uint32_t numCenters = centers.rows();
+  VectorXd distanceSq(numCenters);
+  El::Int newAssignment;
+  uint32_t numChanged = 0;
+
+  for(uint32_t idx = 0; idx < numCenters; ++idx) 
+    clusterSizes[idx] = 0; 
+  
+  for(El::Int rowIdx = 0; rowIdx < dataMat.rows(); ++rowIdx) {
+    for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) 
+      distanceSq[centerIdx] = (dataMat.row(rowIdx) - centers.row(centerIdx)).squaredNorm();
+    distanceSq.minCoeff(&newAssignment);
+    if (rowAssignments[rowIdx] != newAssignment) 
+      numChanged += 1;
+    rowAssignments[rowIdx] = newAssignment;
+    clusterSizes[rowAssignments[rowIdx]] += 1;
+  }
+
+  return numChanged;
+}
+
 void KMeansCommand::run(Worker *self) const {
-  // TODO: use Eigen for local matrix manipulations (Elemental's element-by-element manipulations are tedious af)
   auto origDataMat = self->matrices[origMat].get();
   auto n = origDataMat->Height();
   auto d = origDataMat->Width();
@@ -45,60 +71,32 @@ void KMeansCommand::run(Worker *self) const {
 
   DistMatrix * centers = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(numCenters, d, self->grid);
   DistMatrix * assignments = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, 1, self->grid);
-  El::Matrix<double> localCenters(numCenters, d);
-  El::Gaussian(localCenters, numCenters, d);
-
   ENSURE(self->matrices.insert(std::make_pair(centersHandle, std::unique_ptr<DistMatrix>(centers))).second);
   ENSURE(self->matrices.insert(std::make_pair(assignmentsHandle, std::unique_ptr<DistMatrix>(assignments))).second);
 
-  // compute the map from local row indices to the row indices in the global matrix
-  std::stringstream strbuf;
-  strbuf << format("%s holds rows ") % self->world.rank();
+  MatrixXd localData(dataMat->LocalHeight(), d);
+  MatrixXd localCenters = MatrixXd::Random(numCenters, d);
 
-  std::vector<El::Int> rowMap(dataMat->LocalHeight());
+  // compute the map from local row indices to the row indices in the global matrix
+  // and populate the local data matrix
+
+  std::vector<El::Int> rowMap(localData.rows());
   for(El::Int rowIdx = 0; rowIdx < n; ++rowIdx) 
     if (dataMat->IsLocalRow(rowIdx)) {
-      rowMap[dataMat->LocalRow(rowIdx)] = rowIdx;
-      strbuf << dataMat->LocalRow(rowIdx) << ":" << rowIdx << " ";
+      auto localRowIdx = dataMat->LocalRow(rowIdx);
+      rowMap[localRowIdx] = rowIdx;
+      for(El::Int colIdx = 0; colIdx < d; ++colIdx) 
+        localData(localRowIdx, colIdx) = dataMat->GetLocal(localRowIdx, colIdx);
     }
-  strbuf << "\n";
-  std::cerr << strbuf.str();
-
 
   // compute the local cluster assignments
   std::unique_ptr<uint32_t[]> localCounts{new uint32_t[numCenters]};
-  std::vector<uint32_t> localRowAssignments(dataMat->LocalHeight());
-  std::vector<double> distanceSq(numCenters);
+  std::vector<uint32_t> rowAssignments(localData.rows());
+  VectorXd distanceSq(numCenters);
+  updateAssignmentsAndCounts(localData, localCenters, localCounts.get(), rowAssignments);
 
-  for(uint32_t idx = 0; idx < numCenters; ++idx) 
-    localCounts[idx] = 0; 
-  
-  for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx) {
-    for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) {
-      distanceSq[centerIdx] = 0;
-      for(El::Int colIdx = 0; colIdx < dataMat->Width(); ++colIdx)
-        distanceSq[centerIdx] += pow(dataMat->GetLocal(localRowIdx, colIdx) - localCenters.Get(centerIdx,colIdx), 2); 
-    }
-    auto smallestDist = std::min_element(std::begin(distanceSq), std::end(distanceSq));
-    localRowAssignments[localRowIdx] = std::distance(std::begin(distanceSq), smallestDist); 
-    localCounts[localRowAssignments[localRowIdx]] += 1;
-  }
-
-  strbuf.str() = "";
-  strbuf << format("%s local row assignments ") % self->world.rank();
-  for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx) {
-    strbuf << localRowIdx << ":" << localRowAssignments[localRowIdx] << " ";
-  }
-  strbuf << std::endl;
-  strbuf << format("%s local cluster counts ") % self->world.rank();
-  for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) {
-    strbuf << centerIdx << ":" << localCounts[centerIdx] << " ";
-  }
-  strbuf << std::endl;
-  std::cerr << strbuf.str();
-
-  std::unique_ptr<double[]> bufOut{new double[numCenters*d]};
-  std::unique_ptr<uint32_t[]> newLocalCounts{new uint32_t[numCenters]};
+  MatrixXd centersBuf(numCenters, d);
+  std::unique_ptr<uint32_t[]> countsBuf{new uint32_t[numCenters]};
   uint32_t numChanged = 0;
 
   while(true) {
@@ -107,77 +105,48 @@ void KMeansCommand::run(Worker *self) const {
 
     if (nextCommand == 0xf)  // finished iterating
       break;
-
-
-    strbuf.str() = "";
-    strbuf << format("On %s, pre-reduce cluster counts ") % self->world.rank();
-    for(uint32_t clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx) {
-      strbuf << clusterIdx << ":" << localCounts[clusterIdx] << " ";
+    else if (nextCommand == 2) { // reinitialize cluster centers 
+      localCenters = MatrixXd::Random(numCenters, d);
+      updateAssignmentsAndCounts(localData, localCenters, localCounts.get(), rowAssignments);
     }
-    strbuf << std::endl;
 
     // update the centers
     // TODO: locally compute cluster sums and place in localCenters
-    mpi::all_reduce(self->peers, localCenters.Buffer(), numCenters*d, 
-        bufOut.get(), std::plus<double>());
-    mpi::all_reduce(self->peers, localCounts.get(), numCenters, newLocalCounts.get(), std::plus<uint32_t>());
-    std::memcpy(localCenters.Buffer(), bufOut.get(), numCenters*d*sizeof(double));
-    std::memcpy(localCounts.get(), newLocalCounts.get(), numCenters*sizeof(uint32_t));
+    localCenters.setZero();
+    for(uint32_t rowIdx = 0; rowIdx < localData.rows(); ++rowIdx) 
+      localCenters.row(rowAssignments[rowIdx]) += localData.row(rowIdx);
 
-    strbuf << format("On %s, post-reduce cluster counts ") % self->world.rank();
-    for(uint32_t clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx) {
-      strbuf << clusterIdx << ":" << localCounts[clusterIdx] << " ";
-    }
-    strbuf << std::endl;
-    std::cerr << strbuf.str() << std::flush;
+    mpi::all_reduce(self->peers, localCenters.data(), numCenters*d, centersBuf.data(), std::plus<double>());
+    std::memcpy(localCenters.data(), centersBuf.data(), numCenters*d*sizeof(double));
+    mpi::all_reduce(self->peers, localCounts.get(), numCenters, countsBuf.get(), std::plus<uint32_t>());
+    std::memcpy(localCounts.get(), countsBuf.get(), numCenters*sizeof(uint32_t));
 
     for(uint32_t rowIdx = 0; rowIdx < numCenters; ++rowIdx)
-      for(El::Int colIdx = 0; colIdx < d; ++colIdx)
-        localCenters.Set(rowIdx, colIdx, localCenters.Get(rowIdx, colIdx)/((double) localCounts[rowIdx]));
-
-    std::cerr << format("Here d\n");
+      if( localCounts[rowIdx] > 0)
+        localCenters.row(rowIdx) /= localCounts[rowIdx];
 
     // compute new local assignments
-    numChanged = 0;
-    for(uint32_t idx = 0; idx < numCenters; ++idx)
-      localCounts[idx] = 0;
+    numChanged = updateAssignmentsAndCounts(localData, localCenters, localCounts.get(), rowAssignments);
 
-    for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx) {
-      for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) {
-        distanceSq[centerIdx] = 0;
-        for(El::Int colIdx = 0; colIdx < dataMat->Width(); ++colIdx)
-          distanceSq[centerIdx] += pow(dataMat->GetLocal(localRowIdx, colIdx) - localCenters.Get(centerIdx,colIdx), 2); 
-      }
-      auto smallestDist = std::min_element(std::begin(distanceSq), std::end(distanceSq));
-      auto assignedRow = std::distance(std::begin(distanceSq), smallestDist); 
-      if (localRowAssignments[localRowIdx] != assignedRow)
-        numChanged += 1;
-      localRowAssignments[localRowIdx] = assignedRow;
-      localCounts[assignedRow] += 1;
-    }
-
-    std::cerr << format("Here e\n");
     // return the number of changed assignments
     mpi::reduce(self->world, numChanged, std::plus<int>(), 0);
-
-    std::cerr << format("Here f\n");
+    // return the cluster counts
+    mpi::reduce(self->world, localCounts.get(), numCenters, std::plus<uint32_t>(), 0);
   }
 
-  std::cerr << format("Here g\n");
   // write the final k-means centers and assignments
   El::Zero(*assignments);
-  assignments->Reserve(centers->LocalHeight());
-  for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx)
-    assignments->QueueUpdate(rowMap[localRowIdx], 0, localRowAssignments[localRowIdx]);
+  assignments->Reserve(localData.rows());
+  for(El::Int rowIdx = 0; rowIdx < localData.rows(); ++rowIdx)
+    assignments->QueueUpdate(rowMap[rowIdx], 0, rowAssignments[rowIdx]);
   assignments->ProcessQueues();
 
-  std::cerr << format("Here h\n");
   El::Zero(*centers);
   centers->Reserve(centers->LocalHeight()*d);
-  for(El::Int clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx)
+  for(uint32_t clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx)
     if (centers->IsLocalRow(clusterIdx)) {
       for(El::Int colIdx = 0; colIdx < d; ++colIdx)
-        centers->QueueUpdate(clusterIdx, colIdx, localCenters.Get(clusterIdx, colIdx));
+        centers->QueueUpdate(clusterIdx, colIdx, localCenters(clusterIdx, colIdx));
     }
   centers->ProcessQueues();
 

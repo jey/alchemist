@@ -198,26 +198,52 @@ void Driver::handle_kmeansClustering() {
   double percentMoved = 1.0;
   uint32_t numChanged = 0;
   uint32_t numIters = 0;
+  uint32_t totalIters = 0;
+  uint32_t restarts = 0;
+  std::vector<uint32_t> clusterSizes(numCenters);
+  std::vector<uint32_t> zerosVector(numCenters);
+
+  for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++)
+    zerosVector[clusterIdx] = 0;
 
   uint32_t command = 1; // do another iteration
   while (percentMoved > changeThreshold && numIters++ < maxnumIters)  {
+    std::cerr << format("Starting iteration %d of Lloyd's algorithm, %f percentage changed in last iter \n"
+        "----------------------------------------------------------------------\n") % numIters % percentMoved;
     numChanged = 0;
+    for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++)
+      clusterSizes[clusterIdx] = 0;
     mpi::broadcast(world, command, 0);
-    std::cerr << "about to reduce\n";
-    uint32_t mychanged = 0;
-    mpi::reduce(world, mychanged, numChanged, std::plus<int>(), 0);
+    command = 1; // do a basic iteration
+    mpi::reduce(world, (uint32_t) 0, numChanged, std::plus<int>(), 0);
+    mpi::reduce(world, zerosVector.data(), numCenters, clusterSizes.data(), std::plus<uint32_t>(), 0);
     percentMoved = ((double) numChanged)/n;
-    std::cerr << format("driver: on iteration %d of Lloyd's algorithm, %f percentage changed\n") % numIters % percentMoved;
+
+    uint32_t minClusterSize = *std::min_element(std::begin(clusterSizes), std::end(clusterSizes));
+    if ( minClusterSize < 1) {
+      // this indicates there was an empty cluster, so restart the k-means process
+      restarts += 1;
+      percentMoved = 1.0;
+      totalIters += numIters;
+      numIters = 0;
+
+      std::cerr << format("Restarting Lloyd's algorithm (%d times / %d total iterates so far) because of an empty cluster\n") % restarts % totalIters;
+      command = 2; // reinitialize cluster centers
+    }
   }
   command = 0xf; // terminate and finalize the k-means centers and assignments as distributed matrices
   mpi::broadcast(world, command, 0);
   world.barrier();
 
+  std::cerr << format("Finished Lloyd's algorithm:\n"
+      "\t%d iterations in final run\n"
+      "\t%d total iterations over %d restarts\n"
+      "\t%f percent of points stable in the returned clustering\n") % numIters % totalIters % restarts % ((1-percentMoved)*100);
   output.writeInt(0x1);
   output.writeInt(assignmentsHandle.id);
   output.writeInt(centersHandle.id);
   output.writeInt(numIters);
-  output.writeDouble(percentMoved);
+  output.writeDouble(1-percentMoved);
   output.flush();
 }
 
