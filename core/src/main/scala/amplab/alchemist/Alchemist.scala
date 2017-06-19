@@ -90,6 +90,7 @@ class WorkerClient(val hostname: String, val port: Int) {
     output.flush()
   }
 
+
   def close() = {
     output.close()
     sock.close()
@@ -131,6 +132,54 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     }
   }
 
+  def getTranspose(handle: MatrixHandle) : MatrixHandle = {
+    output.writeInt(0x6) 
+    output.writeInt(handle.id)
+    output.flush()
+    if (input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+    val transposeHandle = new MatrixHandle(input.readInt())
+    if (input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+    System.err.println(s"got handle: ${transposeHandle.id}")
+    transposeHandle
+  }
+
+  def kMeans(mat: MatrixHandle, k : Int, maxIters : Int, threshold: Double) : Tuple4[MatrixHandle, MatrixHandle, Int, Double] = {
+    output.writeInt(0x7)
+    output.writeInt(mat.id)
+    output.writeInt(k)
+    output.writeInt(maxIters)
+    output.writeDouble(threshold)
+    output.flush()
+
+    if (input.readInt() != 0x1) {
+      throw new ProtocolError() 
+    }
+    val assignmentsHandle = new MatrixHandle(input.readInt())
+    val centersHandle = new MatrixHandle(input.readInt())
+    val numIters = input.readInt()
+    val percentageStable = input.readDouble()
+
+    (centersHandle, assignmentsHandle, numIters, percentageStable)
+  }
+
+  def matrixSVDStart(mat: MatrixHandle) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
+    output.writeInt(0x5)
+    output.writeInt(mat.id)
+    output.flush()
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+    val Uhandle = new MatrixHandle(input.readInt())
+    val Shandle = new MatrixHandle(input.readInt())
+    val Vhandle = new MatrixHandle(input.readInt())
+    System.err.println(s"got handles: ${Uhandle.id}, ${Shandle.id}, ${Vhandle.id}")
+    return (Uhandle, Shandle, Vhandle)
+  }
+
   // layout contains one worker ID per matrix partition
   def newMatrixStart(rows: Long, cols: Long, layout: Array[WorkerId]): MatrixHandle = {
     output.writeInt(0x1)
@@ -164,6 +213,13 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     if(input.readInt() != 0x1) {
       throw new ProtocolError() 
     } 
+  }
+
+  def matrixSVDFinish(mat: MatrixHandle) = {
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError()
+    } 
+    System.err.println(s"Finished computing the SVD for handle ${mat.id} successfully")
   }
 
   def newMatrixFinish(mat: MatrixHandle) = {
@@ -253,4 +309,20 @@ class Alchemist(val mysc: SparkContext) {
     client.matrixMulFinish(handle)
     new AlMatrix(this, handle)
   }
+
+  def thinSVD(mat: AlMatrix) : Tuple3[AlMatrix, AlMatrix, AlMatrix] = {
+    val (handleU, handleS, handleV) = client.matrixSVDStart(mat.handle)
+
+    client.matrixSVDFinish(mat.handle)
+    val Umat = new AlMatrix(this, handleU)
+    val Smat = new AlMatrix(this, handleS)
+    val Vmat = new AlMatrix(this, handleV)
+    (Umat, Smat, Vmat)
+  }
+
+  def kMeans(mat: AlMatrix, k: Int, maxIters: Int, threshold: Double) : Tuple4[AlMatrix, AlMatrix, Int, Double] = {
+    val (handleCenters, handleAssignments, numIters, stablePercentage) = client.kMeans(mat.handle, k, maxIters, threshold)
+    (new AlMatrix(this, handleCenters), new AlMatrix(this, handleAssignments), numIters, stablePercentage)
+  }
+
 }

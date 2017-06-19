@@ -7,6 +7,10 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     return al.client.getMatrixDimensions(handle)
   }
 
+  def transpose() : AlMatrix = {
+    new AlMatrix(al, al.client.getTranspose(handle))
+  }
+
   // Caches result by default, because may not want to recreate (e.g. if delete referenced matrix on Alchemist side to save memory)
   def getIndexedRowMatrix() : IndexedRowMatrix = {
     val (numRows, numCols) = getDimensions()

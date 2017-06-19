@@ -78,6 +78,107 @@ struct HaltCommand : Command {
   }
 };
 
+
+/*
+struct ThinSVDCommand : Command {
+  MatrixHandle mat;
+  uint32_t whichFactors;
+  uint32_t krank;
+  MatrixHandle U;
+  MatrixHandle S;
+  MatrixHandle V;
+
+  explicit ThinSVDCommand() {}
+
+  ThinSVDCommand(MatrixHandle mat, uint32_t whichFactors, uint32_t krank,
+      MatrixHandle U, MatrixHandle S, MatrixHandle V) :
+    mat(mat), whichFactors(whichFactors), krank(krank), U(U), S(S), V(V) {}
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive & ar, const unsigned version) {
+    ar & serialization::base_oject<Command>(*this);
+    ar & mat;
+    ar & whichFactors;
+    ar & krank;
+    ar & U;
+    ar & S;
+    ar & V;
+  }
+}
+*/
+
+struct TransposeCommand : Command {
+  MatrixHandle origMat;
+  MatrixHandle transposeMat;
+
+  explicit TransposeCommand() {}
+
+  TransposeCommand(MatrixHandle origMat, MatrixHandle transposeMat) :
+    origMat(origMat), transposeMat(transposeMat) {}
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive & ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & origMat;
+    ar & transposeMat;
+  }
+};
+
+struct KMeansCommand : Command {
+  MatrixHandle origMat;
+  uint32_t numCenters;
+  uint32_t driverRank;
+  MatrixHandle centersHandle;
+  MatrixHandle assignmentsHandle;
+
+  explicit KMeansCommand() {}
+
+  KMeansCommand(MatrixHandle origMat, uint32_t numCenters, uint32_t driverRank,
+      MatrixHandle centersHandle, MatrixHandle assignmentsHandle) :
+    origMat(origMat), numCenters(numCenters), driverRank(driverRank), 
+    centersHandle(centersHandle), assignmentsHandle(assignmentsHandle) {}
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive & ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & origMat;
+    ar & numCenters;
+    ar & driverRank;
+    ar & centersHandle;
+    ar & assignmentsHandle;
+  }
+};
+
+struct ThinSVDCommand : Command {
+  MatrixHandle mat;
+  MatrixHandle Uhandle;
+  MatrixHandle Shandle;
+  MatrixHandle Vhandle;
+
+  explicit ThinSVDCommand() {}
+
+  ThinSVDCommand(MatrixHandle mat, MatrixHandle Uhandle, 
+      MatrixHandle Shandle, MatrixHandle Vhandle) :
+    mat(mat), Uhandle(Uhandle), Shandle(Shandle), Vhandle(Vhandle) {}
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive & ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & mat;
+    ar & Uhandle;
+    ar & Shandle;
+    ar & Vhandle;
+  }
+};
+
 struct MatrixMulCommand : Command {
   MatrixHandle handle;
   MatrixHandle inputA;
@@ -156,5 +257,8 @@ BOOST_CLASS_EXPORT_KEY(alchemist::HaltCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::NewMatrixCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::MatrixMulCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::MatrixGetRowsCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::ThinSVDCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::TransposeCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::KMeansCommand);
 
 #endif

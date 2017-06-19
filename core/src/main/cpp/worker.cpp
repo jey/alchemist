@@ -4,6 +4,9 @@
 #include <fcntl.h>
 #include <poll.h>
 #include "data_stream.h"
+#include <thread>
+#include <chrono>
+#include <algorithm>
 
 namespace alchemist {
 
@@ -27,6 +30,141 @@ struct Worker {
       const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData);
   int main();
 };
+
+void KMeansCommand::run(Worker *self) const {
+  // TODO: pretty sure these are NOT row distributed matrices, nor are the inputs, so need to
+  // copy and relayout input matrices and change the layouts of the centers/assignments matrices
+  auto dataMat = self->matrices[origMat].get();
+  auto n = dataMat->Height();
+  auto d = dataMat->Width();
+
+  DistMatrix * centers = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(numCenters, d, self->grid);
+  DistMatrix * assignments = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, 1, self->grid);
+  El::Matrix<double> localCenters(numCenters, d);
+  El::Gaussian(localCenters, numCenters, d);
+
+  ENSURE(self->matrices.insert(std::make_pair(centersHandle, std::unique_ptr<DistMatrix>(centers))).second);
+  ENSURE(self->matrices.insert(std::make_pair(assignmentsHandle, std::unique_ptr<DistMatrix>(assignments))).second);
+
+  // compute the map from local row indices to the row indices in the global matrix
+  std::vector<El::Int> rowMap(dataMat->LocalHeight());
+  for(El::Int rowIdx = 0; rowIdx < n; ++rowIdx) 
+    if (dataMat->IsLocalRow(rowIdx))
+      rowMap[dataMat->LocalRow(rowIdx)] = rowIdx;
+
+  // compute the local cluster assignments
+  std::unique_ptr<uint32_t[]> localCounts{new uint32_t[numCenters]};
+  std::vector<uint32_t> localRowAssignments(dataMat->LocalHeight());
+  std::vector<double> distanceSq(numCenters);
+
+  for(uint32_t idx = 0; idx < numCenters; ++idx) 
+    localCounts[idx] = 0; 
+  
+  for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx) {
+    for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) {
+      distanceSq[centerIdx] = 0;
+      for(El::Int colIdx = 0; colIdx < dataMat->Width(); ++colIdx)
+        distanceSq[centerIdx] += pow(dataMat->GetLocal(localRowIdx, colIdx) - localCenters.Get(centerIdx,colIdx), 2); 
+    }
+    auto smallestDist = std::min_element(std::begin(distanceSq), std::end(distanceSq));
+    localRowAssignments[localRowIdx] = std::distance(std::begin(distanceSq), smallestDist); 
+    localCounts[localRowAssignments[localRowIdx]] += 1;
+  }
+
+  std::unique_ptr<double[]> bufOut{new double[numCenters*d]};
+  std::unique_ptr<uint32_t[]> newLocalCounts{new uint32_t[numCenters]};
+  uint32_t numChanged = 0;
+
+  while(true) {
+    uint32_t nextCommand;
+    mpi::broadcast(self->world, nextCommand, 0);
+
+    if (nextCommand == 0xf)  // finished iterating
+      break;
+
+    // update the centers
+    mpi::all_reduce(self->peers, localCenters.Buffer(), numCenters*d, 
+        bufOut.get(), std::plus<double>());
+    mpi::all_reduce(self->peers, localCounts.get(), numCenters, newLocalCounts.get(), std::plus<uint32_t>());
+    std::memcpy(localCenters.Buffer(), bufOut.get(), numCenters*d*sizeof(double));
+    std::memcpy(localCounts.get(), newLocalCounts.get(), numCenters*sizeof(uint32_t));
+    for(uint32_t rowIdx = 0; rowIdx < numCenters; ++rowIdx)
+      for(El::Int colIdx = 0; colIdx < d; ++colIdx)
+        localCenters.Set(rowIdx, colIdx, localCenters.Get(rowIdx, colIdx)/((double) localCounts[rowIdx]));
+
+    // compute new local assignments
+    numChanged = 0;
+    for(uint32_t idx = 0; idx < numCenters; ++idx)
+      localCounts[idx] = 0;
+
+    for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx) {
+      for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) {
+        distanceSq[centerIdx] = 0;
+        for(El::Int colIdx = 0; colIdx < dataMat->Width(); ++colIdx)
+          distanceSq[centerIdx] += pow(dataMat->GetLocal(localRowIdx, colIdx) - localCenters.Get(centerIdx,colIdx), 2); 
+      }
+      auto smallestDist = std::min_element(std::begin(distanceSq), std::end(distanceSq));
+      auto assignedRow = std::distance(std::begin(distanceSq), smallestDist); 
+      if (localRowAssignments[localRowIdx] != assignedRow)
+        numChanged += 1;
+      localRowAssignments[localRowIdx] = assignedRow;
+      localCounts[assignedRow] += 1;
+    }
+
+    // return the number of changed assignments
+    mpi::reduce(self->world, numChanged, std::plus<int>(), 0);
+  }
+
+  // write the final k-means centers and assignments
+  for(El::Int localRowIdx = 0; localRowIdx < dataMat->LocalHeight(); ++localRowIdx)
+    assignments->Set(rowMap[localRowIdx], 1, localRowAssignments[localRowIdx]);
+
+  El::Zero(*centers);
+  centers->Reserve(centers->LocalHeight()*d);
+  for(El::Int clusterIdx = 0; clusterIdx < centers->Height(); ++clusterIdx)
+    if (centers->IsLocalRow(clusterIdx)) {
+      for(El::Int colIdx = 0; colIdx < centers->Width(); ++colIdx)
+        centers->QueueUpdate(clusterIdx, colIdx, localCenters.Get(clusterIdx, colIdx));
+    }
+  centers->ProcessQueues();
+
+  self->world.barrier();
+}
+
+void TransposeCommand::run(Worker *self) const {
+  auto m = self->matrices[origMat]->Height();
+  auto n = self->matrices[origMat]->Width();
+  DistMatrix * transposeA = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, m, self->grid);
+  El::Zero(*transposeA);
+  
+  ENSURE(self->matrices.insert(std::make_pair(transposeMat, std::unique_ptr<DistMatrix>(transposeA))).second);
+
+  El::Transpose(*self->matrices[origMat], *transposeA);
+  std::cerr << format("%s: finished transpose call\n") % self->world.rank();
+  self->world.barrier();
+}
+
+void ThinSVDCommand::run(Worker *self) const {
+  auto m = self->matrices[mat]->Height();
+  auto n = self->matrices[mat]->Width();
+  auto k = std::min(m, n);
+  DistMatrix * U = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, k, self->grid);
+  DistMatrix * singvals = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(k, k, self->grid);
+  DistMatrix * V = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, k, self->grid);
+  El::Zero(*U);
+  El::Zero(*V);
+  El::Zero(*singvals);
+
+  ENSURE(self->matrices.insert(std::make_pair(Uhandle, std::unique_ptr<DistMatrix>(U))).second);
+  ENSURE(self->matrices.insert(std::make_pair(Shandle, std::unique_ptr<DistMatrix>(singvals))).second);
+  ENSURE(self->matrices.insert(std::make_pair(Vhandle, std::unique_ptr<DistMatrix>(V))).second);
+
+  DistMatrix * Acopy = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, n, self->grid); // looking at source code for SVD, seems that DistMatrix Acopy(A) might generate copy rather than just copy metadata and risk clobbering
+  El::Copy(*self->matrices[mat], *Acopy);
+  El::SVD(*Acopy, *U, *singvals, *V);
+  std::cerr << format("%s: singvals is %s by %s\n") % self->world.rank() % singvals->Height() % singvals->Width();
+  self->world.barrier();
+}
 
 void MatrixMulCommand::run(Worker *self) const {
   auto m = self->matrices[inputA]->Height();

@@ -4,8 +4,9 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.linalg.{DenseMatrix, DenseVector}
 import org.apache.spark.mllib.linalg.distributed.{IndexedRow, IndexedRowMatrix}
 import org.apache.spark.mllib.random.{RandomRDDs}
-import breeze.linalg.{DenseVector => BDV, max, min, DenseMatrix => BDM, norm}
+import breeze.linalg.{DenseVector => BDV, max, min, DenseMatrix => BDM, norm, diag}
 import breeze.numerics._
+import breeze.linalg.svd
 
 object BasicSuite {
   def main(args: Array[String]): Unit = {
@@ -14,39 +15,60 @@ object BasicSuite {
     System.err.println("test: creating alchemist")
     val al = new Alchemist(sc)
     System.err.println("test: done creating alchemist")
-//    val sparkMatA = randomMatrix(sc, 300, 500)
     val sparkMatA = deterministicMatrix(sc, 30, 50, 1)
     sparkMatA.rows.cache
-//    val sparkMatB = randomMatrix(sc, 500, 200)
     val sparkMatB = deterministicMatrix(sc, 50, 20, 10)
     sparkMatB.rows.cache
 
-    // Spark matrix multiply
-    val sparkMatC = sparkMatA.toBlockMatrix(sparkMatA.numRows.toInt, sparkMatA.numCols.toInt).
-                  multiply(sparkMatB.toBlockMatrix(sparkMatB.numRows.toInt, sparkMatB.numCols.toInt)).toIndexedRowMatrix
+    // // Spark matrix multiply
+    // val sparkMatC = sparkMatA.toBlockMatrix(sparkMatA.numRows.toInt, sparkMatA.numCols.toInt).
+    //               multiply(sparkMatB.toBlockMatrix(sparkMatB.numRows.toInt, sparkMatB.numCols.toInt)).toIndexedRowMatrix
 
-    // Alchemist matrix multiply
+    // TEST: check that sending/receiving matrices works
+    //println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
+    //println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
+    //println("alResLocalMat:")
+    //displayBDM(alResLocalMat)
+    //println("sparkLocalMat:")
+    //displayBDM(sparkLocalMat)
+    
+    // TEST: Alchemist matrix multiply
     val alMatA = AlMatrix(al, sparkMatA)
-    val alMatB = AlMatrix(al, sparkMatB)
-    val alMatC = al.matMul(alMatA, alMatB)
-    val alRes = alMatC.getIndexedRowMatrix()
-    assert(alRes.numRows == sparkMatA.numRows)
-    assert(alRes.numCols == sparkMatB.numCols)
+    //val alMatB = AlMatrix(al, sparkMatB)
+    //val alMatC = al.matMul(alMatA, alMatB)
+    //val alRes = alMatC.getIndexedRowMatrix()
+    //assert(alRes.numRows == sparkMatA.numRows)
+    //assert(alRes.numCols == sparkMatB.numCols)
 
-    val alResLocalMat = toLocalMatrix(alRes)
-    val sparkLocalMat = toLocalMatrix(sparkMatC)
-    val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
-    println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
+    //val alResLocalMat = toLocalMatrix(alRes)
+    //val sparkLocalMat = toLocalMatrix(sparkMatC)
+    //val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
+    //println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
 
-    // check that sending/receiving matrices works
-    println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
-    println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
-    println("alResLocalMat:")
-    displayBDM(alResLocalMat)
-    println("sparkLocalMat:")
-    displayBDM(sparkLocalMat)
+
+    //// TEST: check SVD
+    //// TODO: check U,V orthonormal
+    //// check U*S*V is original matrix
+    //val (alU, alS, alV) = al.thinSVD(alMatA)
+    //val alULocalMat = toLocalMatrix(alU.getIndexedRowMatrix())
+    //val alSLocalMat = toLocalMatrix(alS.getIndexedRowMatrix())
+    //val alVLocalMat = toLocalMatrix(alV.getIndexedRowMatrix())
+    //println(norm((alULocalMat*diag(alSLocalMat(::,0))*alVLocalMat.t - toLocalMatrix(alMatA.getIndexedRowMatrix())).toDenseVector))
+
+    //// TEST: check matrix transpose
+    //val alMatATranspose = alMatA.transpose()
+    //val alMatATransposeLocalMat = toLocalMatrix(alMatATranspose.getIndexedRowMatrix())
+    //println(norm((alMatATransposeLocalMat - toLocalMatrix(alMatA.getIndexedRowMatrix).t).toDenseVector))
+
+    val k : Int = 5
+    val maxIters : Int = 10
+    val threshold : Double = 0.2
+    val (alCenters, alAssignments, numIters, percentageStable) = al.kMeans(alMatA, k, maxIters, threshold)
     al.stop
     sc.stop
+
+    // TEST: check k-means
+
   }
 
   def toLocalMatrix(mat: IndexedRowMatrix) : BDM[Double] = {
@@ -57,9 +79,9 @@ object BasicSuite {
     res
   }
 
-  def displayBDM(mat : BDM[Double]) = {
+  def displayBDM(mat : BDM[Double], truncationLevel : Double = 1e-10) = {
     println(s"${mat.rows} x ${mat.cols}:")
-    (0 until mat.rows).foreach{ i => println(mat(i, ::).t.toArray.mkString(" ")) }
+    (0 until mat.rows).foreach{ i => println(mat(i, ::).t.toArray.map( x => if (x <= truncationLevel) 0 else x).mkString(" ")) }
   }
 
   def deterministicMatrix(sc: SparkContext, numRows: Int, numCols: Int, scale: Double): IndexedRowMatrix = {
