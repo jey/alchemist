@@ -4,9 +4,8 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.linalg.{DenseMatrix, DenseVector}
 import org.apache.spark.mllib.linalg.distributed.{IndexedRow, IndexedRowMatrix}
 import org.apache.spark.mllib.random.{RandomRDDs}
-import breeze.linalg.{DenseVector => BDV, max, min, DenseMatrix => BDM, norm, diag}
+import breeze.linalg.{DenseVector => BDV, max, min, DenseMatrix => BDM, norm, diag, svd}
 import breeze.numerics._
-import breeze.linalg.svd
 
 object BasicSuite {
   def main(args: Array[String]): Unit = {
@@ -79,13 +78,20 @@ object BasicSuite {
     // TEST truncatedSVD
     val k : Int = 5;
     val alMatA = AlMatrix(al, sparkMatA)
-    val (alU, alS, alV) = al.truncatedSVD(alMatA, k)
+    val (alU, alS, alV) = al.truncatedSVD(alMatA, k) // returns sing vals in increas
     val alULocalMat = toLocalMatrix(alU.getIndexedRowMatrix())
     val alSLocalVec = toLocalMatrix(alS.getIndexedRowMatrix())
     val alVLocalMat = toLocalMatrix(alV.getIndexedRowMatrix())
 
-    displayBDM(sparkMatA)
-    displayBDM(alSLocalVec)
+    val A = toLocalMatrix(sparkMatA)
+    val svd.SVD(u,s,v) = svd(A)
+
+    val udiff = u(::, 0 until k)*u(::, 0 until k).t - alULocalMat*alULocalMat.t
+    val vdiff = v(::, 0 until k)*v(::, 0 until k).t - alVLocalMat*alVLocalMat.t
+    println(norm(udiff.toDenseVector))
+    println(norm(vdiff.toDenseVector))
+    println(alSLocalVec)
+    println(s(0 until k))
 
     al.stop
     sc.stop

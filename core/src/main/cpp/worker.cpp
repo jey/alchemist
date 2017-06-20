@@ -8,6 +8,7 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -198,8 +199,8 @@ void TruncatedSVDCommand::run(Worker *self) const {
 
       MatrixXd rightEigs(n, nconv);
       mpi::broadcast(self->world, rightEigs.data(), n*nconv, 0);
-      VectorXd singVals(nconv);
-      mpi::broadcast(self->world, singVals.data(), nconv, 0);
+      VectorXd singValsSq(nconv);
+      mpi::broadcast(self->world, singValsSq.data(), nconv, 0);
 
       DistMatrix * U = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, nconv, self->grid);
       DistMatrix * S = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(nconv, 1, self->grid);
@@ -218,9 +219,9 @@ void TruncatedSVDCommand::run(Worker *self) const {
       // populate S, Sinv
       for(El::Int idx=0; idx < (El::Int) nconv; idx++) {
         if(S->IsLocal(idx, 0)) 
-          S->SetLocal(S->LocalRow(idx), 0, singVals(idx));
+          S->SetLocal(S->LocalRow(idx), 0, std::sqrt(singValsSq(idx)));
         if(Sinv->IsLocal(idx, 0)) 
-          Sinv->SetLocal(Sinv->LocalRow(idx), 0, 1/singVals(idx));
+          Sinv->SetLocal(Sinv->LocalRow(idx), 0, 1/std::sqrt(singValsSq(idx)));
       }
 
       // form U
