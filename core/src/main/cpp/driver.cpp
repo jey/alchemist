@@ -4,6 +4,9 @@
 #include <fstream>
 #include <map>
 #include <ext/stdio_filebuf.h>
+#include "arrssym.h"
+
+using Eigen::MatrixXd;
 
 namespace alchemist {
 
@@ -28,6 +31,7 @@ struct Driver {
   void handle_getMatrixRows();
   void handle_getTranspose();
   void handle_kmeansClustering();
+  void handle_truncatedSVD();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os) :
@@ -63,6 +67,9 @@ int Driver::main() {
   bool shouldExit = false;
   while(!shouldExit) {
     uint32_t typeCode = input.readInt();
+    std::cerr << "AlDriver: received code " << std::hex << typeCode << std::endl;
+    std::cerr << std::flush;
+
     switch(typeCode) {
       // shutdown
       case 0xFFFFFFFF:
@@ -104,10 +111,15 @@ int Driver::main() {
         handle_kmeansClustering();
         break;
 
+      case 0x8:
+        handle_truncatedSVD();
+        break;
+
       default:
         std::cerr << "Unknown typeCode: " << std::hex << typeCode << std::endl;
         abort();
     }
+    std::cerr << "Waiting on next command" << std::endl;
   }
 
   // wait for workers to reach exit
@@ -267,6 +279,71 @@ void Driver::handle_getTranspose() {
   output.writeInt(transposeHandle.id);
   std::cerr << "wrote handle" << std::endl;
   output.writeInt(0x1);
+  output.flush();
+}
+
+// CAVEAT: Assumes tall-and-skinny for now, doesn't allow many options for controlling 
+// LIMITATIONS: assumes V small enough to fit on one machine (so can use ARPACK instead of PARPACK), but still distributes U,S,V and does distributed computations not needed
+void Driver::handle_truncatedSVD() {
+  uint32_t inputMat = input.readInt();
+  uint32_t k = input.readInt();
+
+  MatrixHandle UHandle{nextMatrixId++};
+  MatrixHandle SHandle{nextMatrixId++};
+  MatrixHandle VHandle{nextMatrixId++};
+
+  auto m = matrices[MatrixHandle{inputMat}].numRows;
+  auto n = matrices[MatrixHandle{inputMat}].numCols;
+  TruncatedSVDCommand cmd(MatrixHandle{inputMat}, UHandle, SHandle, VHandle, k);
+
+  issue(cmd);
+
+  ARrcSymStdEig<double> prob(n, k, "LM");
+  uint32_t command;
+  std::vector<double> zerosVector(n);
+  for(uint32_t idx = 0; idx < n; idx++)
+    zerosVector[idx] = 0;
+
+  while (!prob.ArnoldiBasisFound()) {
+    prob.TakeStep();
+    if (prob.GetIdo() == 1 || prob.GetIdo() == -1) {
+      command = 1;
+      mpi::broadcast(world, command, 0); 
+      mpi::broadcast(world, prob.GetVector(), n, 0);
+      mpi::reduce(world, zerosVector.data(), n, prob.PutVector(), std::plus<double>(), 0);
+    }
+  }
+  prob.FindEigenvectors();
+  
+  uint32_t nconv = prob.ConvergedEigenvalues();
+  uint32_t niters = prob.GetIter();
+
+  // assuming tall and skinny A for now
+  MatrixXd rightVecs(n, nconv);
+  // Eigen uses column-major layout by default!
+  for(uint32_t idx = 0; idx < nconv; idx++)
+    std::memcpy(rightVecs.col(idx).data(), prob.RawEigenvector(idx), n*sizeof(double));
+
+  // Populate U, V, S
+  command = 2; 
+  mpi::broadcast(world, command, 0);
+  mpi::broadcast(world, nconv, 0);
+  mpi::broadcast(world, rightVecs.data(), n*nconv, 0);
+  mpi::broadcast(world, prob.RawEigenvalues(), nconv, 0);
+  
+  std::vector<uint32_t> dummy_layout(1);
+  NewMatrixCommand dummyUcmd(UHandle, m, nconv, dummy_layout);
+  NewMatrixCommand dummyScmd(SHandle, nconv, 1, dummy_layout);
+  NewMatrixCommand dummyVcmd(VHandle, n, nconv, dummy_layout);
+  ENSURE(matrices.insert(std::make_pair(UHandle, dummyUcmd)).second);
+  ENSURE(matrices.insert(std::make_pair(SHandle, dummyScmd)).second);
+  ENSURE(matrices.insert(std::make_pair(VHandle, dummyVcmd)).second);
+
+  world.barrier();
+  output.writeInt(0x1);
+  output.writeInt(UHandle.id);
+  output.writeInt(SHandle.id);
+  output.writeInt(VHandle.id);
   output.flush();
 }
 

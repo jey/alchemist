@@ -1,17 +1,20 @@
 ifdef ALPREFIX
   EL_PATH ?= $(ALPREFIX)
   EIGEN_PATH ?= $(ALPREFIX)/include
+  ARPACKPP_PATH ?= $(ALPREFIX)/include/arpackpp
 endif
 EL_PATH ?= $(CURDIR)/../../bins
 EIGEN_PATH ?= $(CURDIR)/../../bins/include
+ARPACKPP_PATH ?= $(CURDIR)/../../bins/include/arpackpp
 include $(EL_PATH)/conf/ElVars
 
 SRC_PATH = src/main
 
-CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH)
+CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH)
 #CXXFLAGS += -O0
 LDFLAGS += $(EL_LINK_FLAGS) -Wl,-rpath,$(EL_LIB) $(EL_LIBS)
 LDFLAGS += -lboost_serialization -lboost_mpi
+LDFLAGS += -larpack
 
 ifdef ALPREFIX
   LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib

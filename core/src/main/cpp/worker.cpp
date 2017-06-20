@@ -65,6 +65,7 @@ void KMeansCommand::run(Worker *self) const {
 
   // TODO: look into using Elemental's read proxies for potentially faster transparent relayouts
   // btw, cf http://libelemental.org/pub/slides/ICS13.pdf slide 19 for the cost of redistribution
+  // TODO: dataMat would be deleted once out of scope anyhow, so remove the unique_ptr wrapper
   std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, d, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
   DistMatrix * dataMat = dataMat_uniqptr.get();
   El::Copy(*origDataMat, *dataMat); // relayout data so it is row-wise partitioned
@@ -149,6 +150,87 @@ void KMeansCommand::run(Worker *self) const {
         centers->QueueUpdate(clusterIdx, colIdx, localCenters(clusterIdx, colIdx));
     }
   centers->ProcessQueues();
+
+  self->world.barrier();
+}
+
+void TruncatedSVDCommand::run(Worker *self) const {
+  auto m = self->matrices[mat]->Height();
+  auto n = self->matrices[mat]->Width();
+  auto A = self->matrices[mat].get();
+
+  uint32_t command;
+  std::unique_ptr<double[]> vecIn{new double[n]};
+  std::unique_ptr<double[]> vecOut{new double[n]};
+
+  for(El::Int idx = 0; idx < n; idx++)
+    vecOut[idx] = 0.0;
+
+  DistMatrix * x = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, 1, self->grid);
+  DistMatrix * yintermed = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, 1, self->grid);
+  DistMatrix * yfinal = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, 1, self->grid);
+
+
+  std::cerr << format("%s: finished inits \n") % self->world.rank();
+
+  while(true) {
+    mpi::broadcast(self->world, command, 0); 
+    if (command == 1) {
+      mpi::broadcast(self->world, vecIn.get(), n, 0);
+      for(El::Int idx=0; idx < n; idx++)
+        if(x->IsLocal(idx,0)) {
+         x->SetLocal(x->LocalRow(idx), 0, vecIn[idx]);
+        }
+
+      El::Gemv(El::NORMAL, 1.0, *A, *x, 0.0, *yintermed);
+      El::Gemv(El::TRANSPOSE, 1.0, *A, *yintermed, 0.0, *yfinal);
+
+      for(El::Int idx=0; idx < n; idx++)
+        if(yfinal->IsLocal(idx,0))
+          vecOut[idx] = yfinal->GetLocal(yfinal->LocalRow(idx),0);
+      mpi::reduce(self->world, vecOut.get(), n, std::plus<double>(), 0);
+      for(El::Int idx = 0; idx < n; idx++)
+        vecOut[idx] = 0.0;
+    }
+    if (command == 2) {
+      uint32_t nconv;
+      mpi::broadcast(self->world, nconv, 0);
+
+      MatrixXd rightEigs(n, nconv);
+      mpi::broadcast(self->world, rightEigs.data(), n*nconv, 0);
+      VectorXd singVals(nconv);
+      mpi::broadcast(self->world, singVals.data(), nconv, 0);
+
+      DistMatrix * U = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, nconv, self->grid);
+      DistMatrix * S = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(nconv, 1, self->grid);
+      DistMatrix * Sinv = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(nconv, 1, self->grid);
+      DistMatrix * V = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, nconv, self->grid);
+
+      ENSURE(self->matrices.insert(std::make_pair(UHandle, std::unique_ptr<DistMatrix>(U))).second);
+      ENSURE(self->matrices.insert(std::make_pair(SHandle, std::unique_ptr<DistMatrix>(S))).second);
+      ENSURE(self->matrices.insert(std::make_pair(VHandle, std::unique_ptr<DistMatrix>(V))).second);
+
+      // populate V
+      for(El::Int rowIdx=0; rowIdx < n; rowIdx++)
+        for(El::Int colIdx=0; colIdx < (El::Int) nconv; colIdx++) 
+          if(V->IsLocal(rowIdx, colIdx)) 
+            V->SetLocal(V->LocalRow(rowIdx), V->LocalCol(colIdx), rightEigs(rowIdx,colIdx));
+      // populate S, Sinv
+      for(El::Int idx=0; idx < (El::Int) nconv; idx++) {
+        if(S->IsLocal(idx, 0)) 
+          S->SetLocal(S->LocalRow(idx), 0, singVals(idx));
+        if(Sinv->IsLocal(idx, 0)) 
+          Sinv->SetLocal(Sinv->LocalRow(idx), 0, 1/singVals(idx));
+      }
+
+      // form U
+      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *V, 0.0, *U);
+      // TODO: do a QR instead, but does column pivoting so would require postprocessing S,V to stay consistent
+      El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);
+
+      break;
+    }
+  }
 
   self->world.barrier();
 }

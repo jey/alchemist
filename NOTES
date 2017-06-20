@@ -1,9 +1,27 @@
+export ALPREFIX=$HOME/proj/alchemist/bins
+
 brew install gcc
 brew install cmake
 brew install boost-mpi
 cd Elemental
 git checkout 0.87
-CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$HOME/proj/alchemist/bins ..
+CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
 nice make -j8
 make install
-# install Eigen3 by copying just the Eigen subdirectory to $HOME/proj/alchemist/bins/include
+
+# install Eigen3 by copying just the Eigen subdirectory to $ALPREFIX/include
+
+git clone https://github.com/opencollab/arpack-ng.git
+cd arpack-ng
+mkdir build
+cd build
+cmake -D EXAMPLES=ON -D MPI=ON -D BUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+nice make -j8
+make install
+
+git clone https://github.com/m-reuter/arpackpp.git
+cd arpackpp
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+make install

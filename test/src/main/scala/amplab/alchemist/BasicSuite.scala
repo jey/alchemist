@@ -60,21 +60,32 @@ object BasicSuite {
     //val alMatATransposeLocalMat = toLocalMatrix(alMatATranspose.getIndexedRowMatrix())
     //println(norm((alMatATransposeLocalMat - toLocalMatrix(alMatA.getIndexedRowMatrix).t).toDenseVector))
 
-    // TEST: check k-means
-    val n : Int = 30;
-    val d : Int = 20;
-    val k : Int = 5
-    val maxIters : Int = 10
-    val threshold : Double = 0.2
-    val (rowAssignments, matKMeans) = kmeansTestMatrix(sc, n, d, k) 
-    val alMatkMeans = AlMatrix(al, matKMeans)
-    val (alCenters, alAssignments, numIters, percentageStable, restarts, totalIters) = al.kMeans(alMatkMeans, k, maxIters, threshold)
+    //// TEST: check k-means
+    //val n : Int = 30;
+    //val d : Int = 20;
+    //val k : Int = 5
+    //val maxIters : Int = 10
+    //val threshold : Double = 0.2
+    //val (rowAssignments, matKMeans) = kmeansTestMatrix(sc, n, d, k) 
+    //val alMatkMeans = AlMatrix(al, matKMeans)
+    //val (alCenters, alAssignments, numIters, percentageStable, restarts, totalIters) = al.kMeans(alMatkMeans, k, maxIters, threshold)
 
-    val alCentersLocalMat = toLocalMatrix(alCenters.getIndexedRowMatrix())
-    val alAssignmentsLocalMat = toLocalMatrix(alAssignments.getIndexedRowMatrix())
-    displayBDM(alCenters.getIndexedRowMatrix())
-    println(rowAssignments.groupBy(_ + 0).mapValues(_.length).toList)
-    println(alAssignmentsLocalMat.data.groupBy(_ + 0).mapValues(_.length).toList)
+    //val alCentersLocalMat = toLocalMatrix(alCenters.getIndexedRowMatrix())
+    //val alAssignmentsLocalMat = toLocalMatrix(alAssignments.getIndexedRowMatrix())
+    //displayBDM(alCenters.getIndexedRowMatrix())
+    //println(rowAssignments.groupBy(_ + 0).mapValues(_.length).toList)
+    //println(alAssignmentsLocalMat.data.groupBy(_ + 0).mapValues(_.length).toList)
+    
+    // TEST truncatedSVD
+    val k : Int = 5;
+    val alMatA = AlMatrix(al, sparkMatA)
+    val (alU, alS, alV) = al.truncatedSVD(alMatA, k)
+    val alULocalMat = toLocalMatrix(alU.getIndexedRowMatrix())
+    val alSLocalVec = toLocalMatrix(alS.getIndexedRowMatrix())
+    val alVLocalMat = toLocalMatrix(alV.getIndexedRowMatrix())
+
+    displayBDM(sparkMatA)
+    displayBDM(alSLocalVec)
 
     al.stop
     sc.stop

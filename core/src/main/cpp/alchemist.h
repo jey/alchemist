@@ -156,6 +156,33 @@ struct KMeansCommand : Command {
   }
 };
 
+struct TruncatedSVDCommand : Command {
+  MatrixHandle mat;
+  MatrixHandle UHandle;
+  MatrixHandle SHandle;
+  MatrixHandle VHandle;
+  uint32_t k;
+
+  explicit TruncatedSVDCommand() {}
+
+  TruncatedSVDCommand(MatrixHandle mat, MatrixHandle UHandle, 
+      MatrixHandle SHandle, MatrixHandle VHandle, uint32_t k) :
+    mat(mat), UHandle(UHandle), SHandle(SHandle), VHandle(VHandle),
+    k(k) {}
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive & ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & mat;
+    ar & UHandle;
+    ar & SHandle;
+    ar & VHandle;
+    ar & k;
+  }
+};
+
 struct ThinSVDCommand : Command {
   MatrixHandle mat;
   MatrixHandle Uhandle;
@@ -261,5 +288,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::MatrixGetRowsCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::ThinSVDCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::TransposeCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::KMeansCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::TruncatedSVDCommand);
 
 #endif
