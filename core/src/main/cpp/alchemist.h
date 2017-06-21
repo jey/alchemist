@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <memory>
 #include <unistd.h>
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
