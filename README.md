@@ -3,10 +3,10 @@ Alchemist is a framework for easily and efficiently calling MPI-based codes from
 ![Platonic Alchemist Architecture](https://github.com/alexgittens/alchemist/blob/master/architecture.png)
 
 Supporting libraries that Alchemist uses:
-Elemental  --- used for distributing the matrices b/w Alchemist processes, distributed linear algebra
-Eigen3 -- used for local matrix manipulations (more convenient interface than Elemental)
-Arpack-ng -- for the computation of truncated SVDs
-Arpackpp -- very convenient C++ interface to Arpack-ng
+* Elemental -- used for distributing the matrices b/w Alchemist processes, distributed linear algebra
+* Eigen3 -- used for local matrix manipulations (more convenient interface than Elemental)
+* Arpack-ng -- for the computation of truncated SVDs
+* Arpackpp -- very convenient C++ interface to Arpack-ng
 
 # To run Alchemist in a fresh terminal:
 ```
