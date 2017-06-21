@@ -20,7 +20,6 @@ make # will both build and run the test suite
 Assuming that the XCode command line tools, Homebrew, and Spark have been installed:
 ```
 brew install gcc
-brew install make --with-default-names
 brew install cmake
 brew install boost-mpi
 brew install sbt
