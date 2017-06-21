@@ -8,9 +8,9 @@ Arpackpp -- very convenient C++ interface to Arpack-ng
 
 # To run Alchemist in a fresh terminal:
 ```
-cd $HOME/Documents/alchemist # or whereever you installed it
+cd $HOME/Documents/alchemist # or wherever you installed it
 export ALPREFIX=$HOME/Documents/alchemist/bins # or whatever you used during install
-export PATH=$PATH:$HOME/local/spark-2.1.1/bin # or whereever spark-bin is located
+export PATH=$PATH:$HOME/local/spark-2.1.1/bin # or wherever spark-bin is located
 make # will both build and run the test suite
 ```
 
