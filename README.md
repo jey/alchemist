@@ -11,6 +11,7 @@ Arpackpp -- very convenient C++ interface to Arpack-ng
 cd $HOME/Documents/alchemist # or wherever you installed it
 export ALPREFIX=$HOME/Documents/alchemist/bins # or whatever you used during install
 export PATH=$PATH:$HOME/local/spark-2.1.1/bin # or wherever spark-bin is located
+export TMPDIR=/tmp # avoid a Mac specific issue with tmpdir length
 make # will both build and run the test suite
 ```
 
