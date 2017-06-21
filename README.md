@@ -1,5 +1,7 @@
 Alchemist is a framework for easily and efficiently calling MPI-based codes from Apache Spark.
 
+![Platonic Alchemist Architecture](https://github.com/alexgittens/alchemist/blob/master/architecture.png)
+
 Supporting libraries that Alchemist uses:
 Elemental  --- used for distributing the matrices b/w Alchemist processes, distributed linear algebra
 Eigen3 -- used for local matrix manipulations (more convenient interface than Elemental)
