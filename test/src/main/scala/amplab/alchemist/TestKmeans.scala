@@ -214,7 +214,7 @@ object TestKmeans {
         //// Collect the clustering results
         t1 = System.nanoTime()
         val indexPredLabels = alAssignments.getIndexedRowMatrix()
-                                        .rows.map(row => (row.index, row.vector.toArray(0)toInt))
+                                        .rows.map(row => (row.index, row.vector.toArray(0).toInt))
                                         .collect
         t2 = System.nanoTime()
         // Print Info

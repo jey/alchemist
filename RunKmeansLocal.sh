@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+export ALPREFIX=$HOME/Documents/alchemist/bins # or whatever you used during install
+export TMPDIR=/tmp # avoid a Mac specific issue with tmpdir length
+
+
 sbt -batch assembly
 
 # user specified
