@@ -58,41 +58,56 @@ class MatrixHandle(val id: Int) extends Serializable {
 }
 
 class WorkerClient(val hostname: String, val port: Int) {
-  val sock = new java.net.Socket(hostname, port)
-  val output = new DataOutputStream(sock.getOutputStream)
-  val input = new DataInputStream(sock.getInputStream)
+  val sock = java.nio.channels.SocketChannel.open(new java.net.InetSocketAddress(hostname, port))
+
+  private def sendMessage(outbuf: ByteBuffer): Unit = {
+    outbuf.rewind()
+    while(sock.write(outbuf) != 0) {
+    }
+  }
 
   def newMatrix_addRow(handle: MatrixHandle, rowIdx: Long, vals: Array[Double]) = {
-    output.writeInt(0x1)  // typeCode = addRow
-    output.writeInt(handle.id)
-    output.writeLong(rowIdx)
-    output.writeDoubleArray(vals)
-    output.flush()
+    val outbuf = ByteBuffer.allocate(4 + 4 + 8 + 8 + 8 * vals.length)
+    outbuf.putInt(0x1)  // typeCode = addRow
+    outbuf.putInt(handle.id)
+    outbuf.putLong(rowIdx)
+    outbuf.putLong(vals.length * 8)
+    outbuf.asDoubleBuffer().put(vals)
+    sendMessage(outbuf)
   }
 
   def newMatrix_partitionComplete(handle: MatrixHandle) = {
-    output.writeInt(0x2)  // typeCode = partitionComplete
+    val outbuf = ByteBuffer.allocate(4)
+    outbuf.putInt(0x2)  // typeCode = partitionComplete
+    sendMessage(outbuf)
   }
 
-  // difficulty? multiple spark workers can be trying to get rows from the 
-  // same alchemist worker at the same time
-  def getIndexedRowMatrix_getRow(handle: MatrixHandle, rowIndex : Long) : DenseVector = {
-    output.writeInt(0x3) // typeCode = getRow
-    output.writeInt(handle.id)
-    output.writeLong(rowIndex)
-    output.flush()
-    new DenseVector(input.readDoubleArray())
+  def getIndexedRowMatrix_getRow(handle: MatrixHandle, rowIndex: Long, numCols: Int) : DenseVector = {
+    val outbuf = ByteBuffer.allocate(4 + 4 + 8)
+    outbuf.putInt(0x3) // typeCode = getRow
+    outbuf.putInt(handle.id)
+    outbuf.putLong(rowIndex)
+    sendMessage(outbuf)
+
+    val inbuf = ByteBuffer.allocate(8 + 8 * numCols)
+    while(inbuf.hasRemaining()) {
+      sock.read(inbuf)
+    }
+    inbuf.flip()
+    assert(numCols * 8 == inbuf.getLong())
+    val vec = new Array[Double](numCols)
+    inbuf.asDoubleBuffer().get(vec)
+    return new DenseVector(vec)
   }
 
   def getIndexedRowMatrix_partitionComplete(handle: MatrixHandle) = {
+    val outbuf = ByteBuffer.allocate(4)
     println(s"Finished getting rows on worker")
-    output.writeInt(0x4) // typeCode = doneGettingRows
-    output.flush()
+    outbuf.putInt(0x4) // typeCode = doneGettingRows
+    sendMessage(outbuf)
   }
 
-
   def close() = {
-    output.close()
     sock.close()
   }
 }

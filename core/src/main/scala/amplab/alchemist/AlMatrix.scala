@@ -30,7 +30,7 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
       val worker = ctx.connectWorker(layout(idx))
       val result  = rowindices.toList.map { rowIndex => 
-        new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex))
+        new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex, numCols))
       }.iterator
 //      worker.getIndexedRowMatrix_partitionComplete(handle)
       worker.close()

@@ -277,9 +277,9 @@ void MatrixMulCommand::run(Worker *self) const {
   DistMatrix * matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, n, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
-  El::Display(*self->matrices[inputA], "A:");
-  El::Display(*self->matrices[inputB], "B:");
-  El::Display(*matrix, "A*B:");
+  //El::Display(*self->matrices[inputA], "A:");
+  //El::Display(*self->matrices[inputB], "B:");
+  //El::Display(*matrix, "A*B:");
   self->world.barrier();
 }
 
@@ -459,7 +459,7 @@ struct WorkerClientSendHandler {
   }
 };
 
-struct WorkerClientRecieveHandler {
+struct WorkerClientReceiveHandler {
   int sock;
   short pollEvents;
   std::vector<char> inbuf;
@@ -467,12 +467,12 @@ struct WorkerClientRecieveHandler {
   DistMatrix *matrix;
   MatrixHandle handle;
 
-  WorkerClientRecieveHandler(int sock, MatrixHandle handle, DistMatrix *matrix) :
+  WorkerClientReceiveHandler(int sock, MatrixHandle handle, DistMatrix *matrix) :
       sock(sock), pollEvents(POLLIN), inbuf(matrix->Width() * 8 + 24),
       pos(0), matrix(matrix), handle(handle) {
   }
 
-  ~WorkerClientRecieveHandler() {
+  ~WorkerClientReceiveHandler() {
     close();
   }
 
@@ -592,7 +592,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
 
 void Worker::receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId> &layout) {
   auto numPartsForMe = std::count(layout.begin(), layout.end(), this->id);
-  std::vector<std::unique_ptr<WorkerClientRecieveHandler>> clients;
+  std::vector<std::unique_ptr<WorkerClientReceiveHandler>> clients;
   std::vector<pollfd> pfds;
   while(numPartsForMe > 0) {
     pfds.clear();
@@ -621,7 +621,7 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
           ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
-          std::unique_ptr<WorkerClientRecieveHandler> client(new WorkerClientRecieveHandler(clientSock, handle, matrices[handle].get()));
+          std::unique_ptr<WorkerClientReceiveHandler> client(new WorkerClientReceiveHandler(clientSock, handle, matrices[handle].get()));
           clients.push_back(std::move(client));
         } else {
           ENSURE(clients[idx]->sock == curSock);
