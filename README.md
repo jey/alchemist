@@ -41,7 +41,7 @@ cd Elemental
 git checkout 0.87
 mkdir build
 cd build
-CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Release -DEL_IGNORE_OSX_GCC_ALIGNMENT_PROBLEM=ON -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
 nice make -j8
 make install
 cd ../..

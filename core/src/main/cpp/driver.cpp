@@ -5,8 +5,10 @@
 #include <map>
 #include <ext/stdio_filebuf.h>
 #include "arrssym.h"
+#include <random>
 
 using Eigen::MatrixXd;
+using Eigen::VectorXd;
 
 namespace alchemist {
 
@@ -183,11 +185,18 @@ void Driver::handle_computeLowrankSVD() {
 
 // TODO: the cluster centers should be stored locally on driver and reduced/broadcasted. the current
 // way of updating kmeans centers is ridiculous
+// TODO: currently only implements kmeans||
 void Driver::handle_kmeansClustering() {
   uint32_t inputMat = input.readInt();
   uint32_t numCenters = input.readInt();
   uint32_t maxnumIters = input.readInt();
-  uint32_t changeThreshold = input.readDouble(); // terminate if no more than changeThreshold percentage of the points change membership in an iteration
+  uint32_t initSteps = input.readInt(); // number of initialization steps to use in kmeans||
+  double changeThreshold = input.readDouble(); // terminate if no more than changeThreshold percentage of the points change membership in an iteration
+  uint32_t method = input.readInt();
+  uint64_t seed = input.readLong();
+
+  // if all the centers change by Euclidean distance less than changeThreshold, then we stop the iterations
+
   MatrixHandle centersHandle{nextMatrixId++};
   MatrixHandle assignmentsHandle{nextMatrixId++};
 
@@ -195,9 +204,11 @@ void Driver::handle_kmeansClustering() {
       std::cerr << "unreasonable change threshold in k-means: " << changeThreshold << std::endl;
       abort();
   }
+  if (method != 1) {
+    std:cerr << "Sorry, only k-means|| initialization has been implemented, so ignoring your choice" << std::endl;
+  }
 
-  KMeansCommand cmd(MatrixHandle{inputMat}, numCenters, 0,
-      centersHandle, assignmentsHandle);
+  KMeansCommand cmd(MatrixHandle{inputMat}, numCenters, method, initSteps, changeThreshold, seed, centersHandle, assignmentsHandle);
   std::vector<uint32_t> dummy_layout(1);
   auto n = matrices[MatrixHandle{inputMat}].numRows;
   auto d = matrices[MatrixHandle{inputMat}].numCols;
@@ -207,57 +218,78 @@ void Driver::handle_kmeansClustering() {
   ENSURE(matrices.insert(std::make_pair(assignmentsHandle, assignmentDummyCmd)).second);
 
   issue(cmd); // initial call initializes stuff and waits for next command
-  double percentMoved = 1.0;
+
+  /******** START of kmeans|| initialization ********/
+  std::mt19937 gen(seed);
+  std::uniform_int_distribution<unsigned long> dis(0, n-1);
+  uint32_t rowidx = dis(gen);
+  std::vector<double> initialCenter(d);
+
+  mpi::broadcast(world, rowidx, 0); // tell the workers which row to use as initialization in kmeans||
+  world.barrier(); // wait for workers to return oversampled cluster centers and sizes
+
+  std::vector<uint32_t> clusterSizes;
+  std::vector<VectorXd> initClusterCenters;
+  world.recv(1, mpi::any_tag, clusterSizes);
+  world.recv(1, mpi::any_tag, initClusterCenters);
+  world.barrier();
+
+  // use kmeans++ locally to find the initial cluster centers
+  MatrixXd clusterCenters(numCenters, d);
+
+  mpi::broadcast(world, clusterCenters, 0);
+  /******** END of kMeans|| initialization ********/
+
+  /******** START of Lloyd's algorithm iterations ********/
+  double percentAssignmentsChanged = 1.0;
+  bool centersMovedQ = true;
   uint32_t numChanged = 0;
   uint32_t numIters = 0;
-  uint32_t totalIters = 0;
-  uint32_t restarts = 0;
-  std::vector<uint32_t> clusterSizes(numCenters);
+  std::vector<uint32_t> parClusterSizes(numCenters);
   std::vector<uint32_t> zerosVector(numCenters);
 
   for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++)
     zerosVector[clusterIdx] = 0;
 
   uint32_t command = 1; // do another iteration
-  while (percentMoved > changeThreshold && numIters++ < maxnumIters)  {
+  while (centersMovedQ && numIters++ < maxnumIters)  {
     std::cerr << format("Starting iteration %d of Lloyd's algorithm, %f percentage changed in last iter \n"
-        "----------------------------------------------------------------------\n") % numIters % percentMoved;
+        "----------------------------------------------------------------------\n") % numIters % percentAssignmentsChanged;
     numChanged = 0;
     for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++)
-      clusterSizes[clusterIdx] = 0;
-    mpi::broadcast(world, command, 0);
+      parClusterSizes[clusterIdx] = 0;
     command = 1; // do a basic iteration
+    mpi::broadcast(world, command, 0);
     mpi::reduce(world, (uint32_t) 0, numChanged, std::plus<int>(), 0);
-    mpi::reduce(world, zerosVector.data(), numCenters, clusterSizes.data(), std::plus<uint32_t>(), 0);
-    percentMoved = ((double) numChanged)/n;
-
-    uint32_t minClusterSize = *std::min_element(std::begin(clusterSizes), std::end(clusterSizes));
-    if ( minClusterSize < 1) {
-      // this indicates there was an empty cluster, so restart the k-means process
-      restarts += 1;
-      percentMoved = 1.0;
-      totalIters += numIters;
-      numIters = 0;
-
-      std::cerr << format("Restarting Lloyd's algorithm (%d times / %d total iterates so far) because of an empty cluster\n") % restarts % totalIters;
-      command = 2; // reinitialize cluster centers
+    mpi::reduce(world, zerosVector.data(), numCenters, parClusterSizes.data(), std::plus<uint32_t>(), 0);
+    world.recv(1, mpi::any_tag, centersMovedQ);
+    percentAssignmentsChanged = ((double) numChanged)/n;
+      
+    for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++) {
+      if (parClusterSizes[clusterIdx] == 0) {
+        // this is an empty cluster, so randomly pick a point in the dataset
+        // as that cluster's centroid
+        centersMovedQ = true;
+        command = 2; // reinitialize this cluster center
+        mpi::broadcast(world, command, 0);
+        mpi::broadcast(world, clusterIdx, 0);
+      }
     }
+
   }
   command = 0xf; // terminate and finalize the k-means centers and assignments as distributed matrices
   mpi::broadcast(world, command, 0);
   world.barrier();
 
+  /******** END of Lloyd's iterations ********/
+
   std::cerr << format("Finished Lloyd's algorithm:\n"
-      "\t%d iterations in final run\n"
-      "\t%d total iterations over %d restarts\n"
-      "\t%f percent of points stable in the returned clustering\n") % numIters % totalIters % restarts % ((1-percentMoved)*100);
+      "\t%d iterations\n"
+      "\t%f percent of points stable in the returned clustering\n") % numIters % ((1-percentAssignmentsChanged)*100);
   output.writeInt(0x1);
   output.writeInt(assignmentsHandle.id);
   output.writeInt(centersHandle.id);
   output.writeInt(numIters);
-  output.writeDouble(1-percentMoved);
-  output.writeInt(restarts);
-  output.writeInt(totalIters);
   output.flush();
 }
 
@@ -304,19 +336,25 @@ void Driver::handle_truncatedSVD() {
   for(uint32_t idx = 0; idx < n; idx++)
     zerosVector[idx] = 0;
 
+  int iterNum = 0;
+
   while (!prob.ArnoldiBasisFound()) {
     prob.TakeStep();
+    ++iterNum;
     if (prob.GetIdo() == 1 || prob.GetIdo() == -1) {
       command = 1;
       mpi::broadcast(world, command, 0); 
+      std::cerr << "Step " << std::dec << iterNum << ": successfully broadcast x\n";
       mpi::broadcast(world, prob.GetVector(), n, 0);
       mpi::reduce(world, zerosVector.data(), n, prob.PutVector(), std::plus<double>(), 0);
+      std::cerr << "Step " << iterNum << ": successfully received A^TA*x\n";
     }
   }
+
   prob.FindEigenvectors();
-  
   uint32_t nconv = prob.ConvergedEigenvalues();
   uint32_t niters = prob.GetIter();
+  std::cerr << "Done after " << niters << " Arnoldi iterations\n";
 
   // assuming tall and skinny A for now
   MatrixXd rightVecs(n, nconv);

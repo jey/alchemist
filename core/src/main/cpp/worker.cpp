@@ -13,6 +13,9 @@
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
+// assuming SRC is a row-major Eigen matrix, copies row ROW of it to the double array DEST
+#define copyEigenRowToArrayMACRO(DEST, SRC, ROW) std::memcpy(DEST, SRC.data() + SRC.cols()*(ROW), SRC.cols()*sizeof(double))
+
 namespace alchemist {
 
 struct Worker {
@@ -59,25 +62,136 @@ uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & c
   return numChanged;
 }
 
+// TODO: add seed as argument (make sure different workers do different things)
+void kmeansParallelInit(Worker * self, DistMatrix const * dataMat, 
+    MatrixXd const & localData, uint32_t scale, uint32_t initSteps, MatrixXd & clusterCenters) {
+
+  auto d = localData.cols();
+
+  // if you have the initial cluster seed, send it to everyone
+  uint32_t rowIdx;
+  mpi::broadcast(self->world, rowIdx, 0);
+  MatrixXd initialCenter;
+
+  if (dataMat->IsLocalRow(rowIdx)) {
+    auto localRowIdx = dataMat->LocalRow(rowIdx);
+    initialCenter = localData.row(localRowIdx);
+    int maybe_root = 1;
+    int rootProcess;
+    mpi::all_reduce(self->peers, self->peers.rank(), rootProcess, std::plus<int>());
+    mpi::broadcast(self->peers, initialCenter, self->peers.rank());
+  }
+  else {
+    int maybe_root = 0;
+    int rootProcess;
+    mpi::all_reduce(self->peers, 0, rootProcess, std::plus<int>());
+    mpi::broadcast(self->peers, initialCenter, rootProcess);
+  }
+
+  //in each step, sample 2*k points on average (totalled across the partitions)
+  // with probability proportional to their squared distance from the current
+  // cluster centers and add the sampled points to the set of cluster centers
+  std::vector<double> distSqToCenters(localData.rows());
+  double Z; // normalization constant
+  std::random_device rd; // gives seed
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<double> dis(0, 1);
+
+  std::vector<VectorXd> initCenters;
+  initCenters.push_back(initialCenter);
+
+  for(int steps = 0; steps < initSteps; ++steps) {
+    // 1) compute the distance of your points from the set of centers and all_reduce
+    // to get the normalization for the sampling probability
+    VectorXd distSq(initCenters.size());
+    Z = 0;
+    for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
+      for(uint32_t centerIdx = 0; centerIdx < initCenters.size(); ++centerIdx) 
+        distSq[centerIdx] = (localData.row(pointIdx) - initCenters[centerIdx]).squaredNorm();
+      distSqToCenters[pointIdx] = distSq.minCoeff();
+      Z += distSqToCenters[rowIdx];
+    }
+    mpi::all_reduce(self->peers, mpi::inplace_t<double>(Z), std::plus<double>());
+
+    // 2) sample your points accordingly 
+    std::vector<VectorXd> localNewCenters;
+    for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
+      bool sampledQ = ((scale * dis(gen)) < (distSqToCenters[pointIdx]/Z)) ? true : false;
+      if (sampledQ) {
+        VectorXd newCenter = localData.row(pointIdx);
+        localNewCenters.push_back(newCenter);
+      }
+    };
+    
+    // 3) have each worker broadcast out their sampled points to all other workers, 
+    // to update each worker's set of centers
+    for(uint32_t root= 0; root < self->peers.size(); ++root) {
+      if (root == self->peers.rank()) {
+        mpi::broadcast(self->peers, localNewCenters, root);
+        initCenters.insert(initCenters.begin(), localNewCenters.begin(), localNewCenters.end());
+      } else {
+        std::vector<VectorXd> remoteNewCenters;
+        mpi::broadcast(self->peers, remoteNewCenters, root);
+        initCenters.insert(initCenters.begin(), remoteNewCenters.begin(), remoteNewCenters.end());
+      }
+    }
+  } // end for
+
+  // figure out the number of points closest to each cluster center
+  std::vector<uint32_t> clusterSizes(initCenters.size(), 0); 
+  std::vector<uint32_t> localClusterSizes(initCenters.size(), 0); 
+  VectorXd distSq(initCenters.size());
+  for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
+    for(uint32_t centerIdx = 0; centerIdx < initCenters.size(); ++centerIdx) 
+      distSq[centerIdx] = (localData.row(pointIdx) - initCenters[centerIdx]).squaredNorm();
+    uint32_t clusterIdx;
+    distSq.minCoeff(&clusterIdx);
+    localClusterSizes[clusterIdx] += 1;
+  }
+
+  mpi::all_reduce(self->peers, localClusterSizes.data(), localClusterSizes.size(), 
+      clusterSizes.data(), std::plus<uint32_t>());
+
+  // after centers have been sampled, sync back up with the driver,
+  // and send them there for local clustering
+  self->world.barrier();
+  if(self->world.rank() == 1) {
+    self->world.send(0, 0, clusterSizes);
+    self->world.send(0, 0, initCenters);
+  }
+  self->world.barrier();
+
+  // now set the cluster centers using the driver's output
+  mpi::broadcast(self->world, clusterCenters, 0);
+}
+
+// TODO: add seed as argument (make sure different workers do different things)
 void KMeansCommand::run(Worker *self) const {
   auto origDataMat = self->matrices[origMat].get();
   auto n = origDataMat->Height();
   auto d = origDataMat->Width();
 
-  // TODO: look into using Elemental's read proxies for potentially faster transparent relayouts
-  // btw, cf http://libelemental.org/pub/slides/ICS13.pdf slide 19 for the cost of redistribution
-  // TODO: dataMat would be deleted once out of scope anyhow, so remove the unique_ptr wrapper
-  std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, d, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
-  DistMatrix * dataMat = dataMat_uniqptr.get();
-  El::Copy(*origDataMat, *dataMat); // relayout data so it is row-wise partitioned
+  // relayout matrix if needed so that it is in row-partitioned format
+  // cf http://libelemental.org/pub/slides/ICS13.pdf slide 19 for the cost of redistribution
+  auto distData = origDataMat->DistData();
+  DistMatrix * dataMat = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, d, self->grid); 
+  if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
+   dataMat = origDataMat;
+  } else {
+    std::cerr << self->world.rank() << ": detected matrix is not row-partitioned, so relayout-ing to row-partitioned";
+    auto relayoutStart = std::chrono::system_clock::now();
+    El::Copy(*origDataMat, *dataMat); // relayouts data so it is row-wise partitioned
+    std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - relayoutStart);
+    std::cerr << self->world.rank() << ": relayout took " << relayoutDuration.count() << "ms\n";
+  }
 
+  // TODO: store these as local matrices on the driver
   DistMatrix * centers = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(numCenters, d, self->grid);
   DistMatrix * assignments = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, 1, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(centersHandle, std::unique_ptr<DistMatrix>(centers))).second);
   ENSURE(self->matrices.insert(std::make_pair(assignmentsHandle, std::unique_ptr<DistMatrix>(assignments))).second);
 
   MatrixXd localData(dataMat->LocalHeight(), d);
-  MatrixXd localCenters = MatrixXd::Random(numCenters, d);
 
   // compute the map from local row indices to the row indices in the global matrix
   // and populate the local data matrix
@@ -91,11 +205,20 @@ void KMeansCommand::run(Worker *self) const {
         localData(localRowIdx, colIdx) = dataMat->GetLocal(localRowIdx, colIdx);
     }
 
+  MatrixXd clusterCenters(numCenters, d);
+
+  // initialize centers using kMeans||
+  uint32_t scale = 2*numCenters;
+  kmeansParallelInit(self, dataMat, localData, scale, initSteps, clusterCenters);
+
+  // TODO: allow to initialize k-means randomly
+  //MatrixXd clusterCenters = MatrixXd::Random(numCenters, d);
+
   // compute the local cluster assignments
-  std::unique_ptr<uint32_t[]> localCounts{new uint32_t[numCenters]};
+  std::unique_ptr<uint32_t[]> counts{new uint32_t[numCenters]};
   std::vector<uint32_t> rowAssignments(localData.rows());
   VectorXd distanceSq(numCenters);
-  updateAssignmentsAndCounts(localData, localCenters, localCounts.get(), rowAssignments);
+  updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
 
   MatrixXd centersBuf(numCenters, d);
   std::unique_ptr<uint32_t[]> countsBuf{new uint32_t[numCenters]};
@@ -107,36 +230,37 @@ void KMeansCommand::run(Worker *self) const {
 
     if (nextCommand == 0xf)  // finished iterating
       break;
-    else if (nextCommand == 2) { // reinitialize cluster centers 
-      localCenters = MatrixXd::Random(numCenters, d);
-      updateAssignmentsAndCounts(localData, localCenters, localCounts.get(), rowAssignments);
+    else if (nextCommand == 2) { // reinitialize cluster centers  TODO: make this work for kmeansParallel as well
+      clusterCenters = MatrixXd::Random(numCenters, d);
+      updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
     }
 
     // update the centers
-    // TODO: locally compute cluster sums and place in localCenters
-    localCenters.setZero();
+    // TODO: locally compute cluster sums and place in clusterCenters
+    clusterCenters.setZero();
     for(uint32_t rowIdx = 0; rowIdx < localData.rows(); ++rowIdx) 
-      localCenters.row(rowAssignments[rowIdx]) += localData.row(rowIdx);
+      clusterCenters.row(rowAssignments[rowIdx]) += localData.row(rowIdx);
 
-    mpi::all_reduce(self->peers, localCenters.data(), numCenters*d, centersBuf.data(), std::plus<double>());
-    std::memcpy(localCenters.data(), centersBuf.data(), numCenters*d*sizeof(double));
-    mpi::all_reduce(self->peers, localCounts.get(), numCenters, countsBuf.get(), std::plus<uint32_t>());
-    std::memcpy(localCounts.get(), countsBuf.get(), numCenters*sizeof(uint32_t));
+    mpi::all_reduce(self->peers, clusterCenters.data(), numCenters*d, centersBuf.data(), std::plus<double>());
+    std::memcpy(clusterCenters.data(), centersBuf.data(), numCenters*d*sizeof(double));
+    mpi::all_reduce(self->peers, counts.get(), numCenters, countsBuf.get(), std::plus<uint32_t>());
+    std::memcpy(counts.get(), countsBuf.get(), numCenters*sizeof(uint32_t));
 
     for(uint32_t rowIdx = 0; rowIdx < numCenters; ++rowIdx)
-      if( localCounts[rowIdx] > 0)
-        localCenters.row(rowIdx) /= localCounts[rowIdx];
+      if( counts[rowIdx] > 0)
+        clusterCenters.row(rowIdx) /= counts[rowIdx];
 
     // compute new local assignments
-    numChanged = updateAssignmentsAndCounts(localData, localCenters, localCounts.get(), rowAssignments);
+    numChanged = updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
 
     // return the number of changed assignments
     mpi::reduce(self->world, numChanged, std::plus<int>(), 0);
     // return the cluster counts
-    mpi::reduce(self->world, localCounts.get(), numCenters, std::plus<uint32_t>(), 0);
+    mpi::reduce(self->world, counts.get(), numCenters, std::plus<uint32_t>(), 0);
   }
 
   // write the final k-means centers and assignments
+  auto startKMeansWrite = std::chrono::system_clock::now();
   El::Zero(*assignments);
   assignments->Reserve(localData.rows());
   for(El::Int rowIdx = 0; rowIdx < localData.rows(); ++rowIdx)
@@ -148,9 +272,11 @@ void KMeansCommand::run(Worker *self) const {
   for(uint32_t clusterIdx = 0; clusterIdx < numCenters; ++clusterIdx)
     if (centers->IsLocalRow(clusterIdx)) {
       for(El::Int colIdx = 0; colIdx < d; ++colIdx)
-        centers->QueueUpdate(clusterIdx, colIdx, localCenters(clusterIdx, colIdx));
+        centers->QueueUpdate(clusterIdx, colIdx, clusterCenters(clusterIdx, colIdx));
     }
   centers->ProcessQueues();
+  std::chrono::duration<double, std::milli> kMeansWrite_duration(std::chrono::system_clock::now() - startKMeansWrite);
+  std::cerr << self->world.rank() << ": writing the k-means centers and assignments took " << kMeansWrite_duration.count() << "ms\n";
 
   self->world.barrier();
 }
@@ -160,38 +286,54 @@ void TruncatedSVDCommand::run(Worker *self) const {
   auto n = self->matrices[mat]->Width();
   auto A = self->matrices[mat].get();
 
+  // Relayout matrix so it is row-partitioned
+  DistMatrix * workingMat;
+  std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(m, n, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
+  auto distData = A->DistData();
+  if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
+    workingMat = A;
+  } else {
+    std::cerr << self->world.rank() << ": detected matrix is not row-partitioned, so relayout-ing to row-partitioned";
+    workingMat = dataMat_uniqptr.get();
+    auto relayoutStart = std::chrono::system_clock::now();
+    El::Copy(*A, *workingMat); // relayouts data so it is row-wise partitioned
+    std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - relayoutStart);
+    std::cerr << self->world.rank() << ": relayout took " << relayoutDuration.count() << "ms\n";
+  }
+
+  // Retrieve your local block of rows and compute local contribution to A'*A 
+  MatrixXd localData(workingMat->LocalHeight(), n);
+
+  auto startFillLocalMat = std::chrono::system_clock::now();
+  std::vector<El::Int> rowMap(localData.rows());
+  for(El::Int rowIdx = 0; rowIdx < m; ++rowIdx) 
+    if (workingMat->IsLocalRow(rowIdx)) {
+      auto localRowIdx = workingMat->LocalRow(rowIdx);
+      rowMap[localRowIdx] = rowIdx;
+      for(El::Int colIdx = 0; colIdx < n; ++colIdx) 
+        localData(localRowIdx, colIdx) = workingMat->GetLocal(localRowIdx, colIdx);
+    }
+  MatrixXd gramMat = localData.transpose()*localData;
+  std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
+  std::cerr << self->world.rank() << ": Took " << fillLocalMat_duration.count() <<"ms to compute local contribution to A'*A\n";
+
   uint32_t command;
   std::unique_ptr<double[]> vecIn{new double[n]};
-  std::unique_ptr<double[]> vecOut{new double[n]};
-
-  for(El::Int idx = 0; idx < n; idx++)
-    vecOut[idx] = 0.0;
-
-  DistMatrix * x = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, 1, self->grid);
-  DistMatrix * yintermed = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, 1, self->grid);
-  DistMatrix * yfinal = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, 1, self->grid);
-
 
   std::cerr << format("%s: finished inits \n") % self->world.rank();
 
   while(true) {
     mpi::broadcast(self->world, command, 0); 
-    if (command == 1) {
+    if (command == 1) { 
       mpi::broadcast(self->world, vecIn.get(), n, 0);
-      for(El::Int idx=0; idx < n; idx++)
-        if(x->IsLocal(idx,0)) {
-         x->SetLocal(x->LocalRow(idx), 0, vecIn[idx]);
-        }
 
-      El::Gemv(El::NORMAL, 1.0, *A, *x, 0.0, *yintermed);
-      El::Gemv(El::TRANSPOSE, 1.0, *A, *yintermed, 0.0, *yfinal);
+      auto startMvProd = std::chrono::system_clock::now();
+      Eigen::Map<VectorXd> x(vecIn.get(), n);
+      VectorXd y = gramMat * x;
+      std::chrono::duration<double, std::milli> elapsed_msMvProd(std::chrono::system_clock::now() - startMvProd);
+      std::cerr << self->world.rank() << ": Took " << elapsed_msMvProd.count() << "ms to multiply A'*A*x\n";
 
-      for(El::Int idx=0; idx < n; idx++)
-        if(yfinal->IsLocal(idx,0))
-          vecOut[idx] = yfinal->GetLocal(yfinal->LocalRow(idx),0);
-      mpi::reduce(self->world, vecOut.get(), n, std::plus<double>(), 0);
-      for(El::Int idx = 0; idx < n; idx++)
-        vecOut[idx] = 0.0;
+      mpi::reduce(self->world, y.data(), n, std::plus<double>(), 0);
     }
     if (command == 2) {
       uint32_t nconv;

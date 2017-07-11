@@ -10,10 +10,10 @@ include $(EL_PATH)/conf/ElVars
 
 SRC_PATH = src/main
 
-CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH)
+CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH) -std=c++14 -O3
 #CXXFLAGS += -O0
 LDFLAGS += $(EL_LINK_FLAGS) -Wl,-rpath,$(EL_LIB) $(EL_LIBS)
-LDFLAGS += -lboost_serialization -lboost_mpi
+LDFLAGS += -lboost_serialization -lboost_mpi -lmpi
 LDFLAGS += -larpack
 
 ifdef ALPREFIX

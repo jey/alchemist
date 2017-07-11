@@ -3,6 +3,7 @@
 
 #include <El.hpp>
 #include <boost/serialization/serialization.hpp>
+#include <boost/serialization/vector.hpp>
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/export.hpp>
 #include <boost/format.hpp>
@@ -23,15 +24,41 @@
   fprintf(stderr, "FATAL: invariant violated: %s:%d: %s\n", __FILE__, __LINE__, #x); fflush(stderr); abort(); } while(0)
 #endif
 
+namespace boost { namespace serialization {
+	template< class Archive,
+						class S,
+						int Rows_,
+						int Cols_,
+						int Ops_,
+						int MaxRows_,
+						int MaxCols_>
+	inline void serialize(Archive & ar, 
+		Eigen::Matrix<S, Rows_, Cols_, Ops_, MaxRows_, MaxCols_> & matrix, 
+		const unsigned int version)
+	{
+		int rows = matrix.rows();
+		int cols = matrix.cols();
+		ar & make_nvp("rows", rows);
+		ar & make_nvp("cols", cols);    
+		matrix.resize(rows, cols); // no-op if size does not change!
+
+		// always save/load col-major
+		for(int c = 0; c < cols; ++c)
+			for(int r = 0; r < rows; ++r)
+				ar & make_nvp("val", matrix(r,c));
+	}
+}} // namespace boost::serialization
+
 namespace alchemist {
 
-namespace mpi = boost::mpi;
 namespace serialization = boost::serialization;
+namespace mpi = boost::mpi;
 using boost::format;
 
 typedef El::Matrix<double> Matrix;
 typedef El::AbstractDistMatrix<double> DistMatrix;
 typedef uint32_t WorkerId;
+
 
 struct Worker;
 
@@ -132,16 +159,21 @@ struct TransposeCommand : Command {
 struct KMeansCommand : Command {
   MatrixHandle origMat;
   uint32_t numCenters;
-  uint32_t driverRank;
+  uint32_t initSteps; // relevant in k-means|| only
+  double changeThreshold; // stop when all centers change by Euclidean distance less than changeThreshold
+  uint32_t method;
+  uint64_t seed;
   MatrixHandle centersHandle;
   MatrixHandle assignmentsHandle;
 
   explicit KMeansCommand() {}
 
-  KMeansCommand(MatrixHandle origMat, uint32_t numCenters, uint32_t driverRank,
+  KMeansCommand(MatrixHandle origMat, uint32_t numCenters, uint32_t method,
+      uint32_t initSteps, double changeThreshold, uint64_t seed, 
       MatrixHandle centersHandle, MatrixHandle assignmentsHandle) :
-    origMat(origMat), numCenters(numCenters), driverRank(driverRank), 
-    centersHandle(centersHandle), assignmentsHandle(assignmentsHandle) {}
+    origMat(origMat), numCenters(numCenters), method(method),
+    initSteps(initSteps), changeThreshold(changeThreshold), 
+    seed(seed), centersHandle(centersHandle), assignmentsHandle(assignmentsHandle) {}
 
   virtual void run(Worker *self) const;
 
@@ -150,7 +182,10 @@ struct KMeansCommand : Command {
     ar & serialization::base_object<Command>(*this);
     ar & origMat;
     ar & numCenters;
-    ar & driverRank;
+    ar & initSteps;
+    ar & changeThreshold;
+    ar & method;
+    ar & seed,
     ar & centersHandle;
     ar & assignmentsHandle;
   }
