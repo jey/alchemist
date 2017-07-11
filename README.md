@@ -1,16 +1,19 @@
 Alchemist is a framework for easily and efficiently calling MPI-based codes from Apache Spark.
 
+![Platonic Alchemist Architecture](https://github.com/alexgittens/alchemist/blob/master/architecture.png)
+
 Supporting libraries that Alchemist uses:
-Elemental  --- used for distributing the matrices b/w Alchemist processes, distributed linear algebra
-Eigen3 -- used for local matrix manipulations (more convenient interface than Elemental)
-Arpack-ng -- for the computation of truncated SVDs
-Arpackpp -- very convenient C++ interface to Arpack-ng
+* Elemental -- used for distributing the matrices b/w Alchemist processes, distributed linear algebra
+* Eigen3 -- used for local matrix manipulations (more convenient interface than Elemental)
+* Arpack-ng -- for the computation of truncated SVDs
+* Arpackpp -- very convenient C++ interface to Arpack-ng
 
 # To run Alchemist in a fresh terminal:
 ```
 cd $HOME/Documents/alchemist # or wherever you installed it
 export ALPREFIX=$HOME/Documents/alchemist/bins # or whatever you used during install
 export PATH=$PATH:$HOME/local/spark-2.1.1/bin # or wherever spark-bin is located
+export TMPDIR=/tmp # avoid a Mac specific issue with tmpdir length
 make # will both build and run the test suite
 ```
 
