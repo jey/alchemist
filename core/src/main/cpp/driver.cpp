@@ -234,6 +234,12 @@ void Driver::handle_kmeansClustering() {
   world.recv(1, mpi::any_tag, initClusterCenters);
   world.barrier();
 
+  std::cerr << "Retrieved the k-means|| oversized cluster centers\n";
+  std::cerr << "Refined to these centers: \n";
+  for(uint32_t centerIdx = 0; centerIdx < numCenters; centerIdx++) {
+    std::cerr << initClusterCenters[centerIdx] << std::endl;
+  }
+
   // use kmeans++ locally to find the initial cluster centers
   std::vector<double> weights;
   weights.reserve(clusterSizes.size());

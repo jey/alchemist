@@ -46,7 +46,6 @@ void kmeansPP(uint32_t seed, std::vector<MatrixXd> points, std::vector<double> w
   }
   auto end = std::chrono::system_clock::now();
   std::chrono::duration<double, std::milli> elapsed_ms(end - start);
-  std::cerr<< "Took " << elapsed_ms.count()<< "ms to form the first sampling density" << std::endl;
 
   for(uint32_t centerSelectionIdx = 1; centerSelectionIdx < k; centerSelectionIdx++) {
     stopSum = unifReal(randGen)*std::accumulate(samplingDensity.begin(), samplingDensity.end(), 0.0);
@@ -76,7 +75,6 @@ void kmeansPP(uint32_t seed, std::vector<MatrixXd> points, std::vector<double> w
 
   uint32_t iter = 0;
   for(; iter < maxIters; iter++) {
-    std::cerr << iter << std::endl;
     movedQ = false;
     clusterPointSums.setZero();
     std::fill(clusterSizes.begin(), clusterSizes.end(), 0);
@@ -107,8 +105,6 @@ void kmeansPP(uint32_t seed, std::vector<MatrixXd> points, std::vector<double> w
       }
     }
   }
-
-  std::cerr << "finished after " << iter << " iterations" << std::endl;
 
   // seems necessary to force eigen to return the centers as an actual usable matrix
   for(uint32_t rowidx = 0; rowidx < k; rowidx++)

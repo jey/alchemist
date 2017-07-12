@@ -177,7 +177,7 @@ void KMeansCommand::run(Worker *self) const {
   if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
    dataMat = origDataMat;
   } else {
-    std::cerr << self->world.rank() << ": detected matrix is not row-partitioned, so relayout-ing to row-partitioned";
+    std::cerr << self->world.rank() << ": detected matrix is not row-partitioned, so relayout-ing to row-partitioned\n";
     auto relayoutStart = std::chrono::system_clock::now();
     El::Copy(*origDataMat, *dataMat); // relayouts data so it is row-wise partitioned
     std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - relayoutStart);

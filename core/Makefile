@@ -9,6 +9,7 @@ ARPACKPP_PATH ?= $(CURDIR)/../../bins/include/arpackpp
 include $(EL_PATH)/conf/ElVars
 
 SRC_PATH = src/main
+TARGET_PATH = target
 
 CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH) -std=c++14 -O3
 #CXXFLAGS += -O0
@@ -20,22 +21,25 @@ ifdef ALPREFIX
   LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 endif
 
-CXX_SRCS = \
-	$(SRC_PATH)/cpp/kmeans++.cpp \
-	$(SRC_PATH)/cpp/alchemist.cpp \
-	$(SRC_PATH)/cpp/driver.cpp \
-	$(SRC_PATH)/cpp/worker.cpp \
+OBJ_FILES = \
+	$(TARGET_PATH)/kmeans++.o \
+	$(TARGET_PATH)/alchemist.o \
+	$(TARGET_PATH)/driver.o \
+	$(TARGET_PATH)/worker.o \
 	#
 
+$(TARGET_PATH)/%.o: $(SRC_PATH)/cpp/%.cpp $(SRC_PATH)/cpp/alchemist.h
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
 .PHONY: default
-default: target/alchemist
+default: $(TARGET_PATH)/alchemist
 
-target/alchemist: target $(SRC_PATH)/cpp/alchemist.h $(CXX_SRCS)
-	$(CXX) $(CXXFLAGS) -o $@ $(CXX_SRCS) $(LDFLAGS)
+$(TARGET_PATH)/alchemist: $(TARGET_PATH) $(OBJ_FILES)
+	$(CXX) -o $(TARGET_PATH)/alchemist $(OBJ_FILES) $(LDFLAGS)
 
-target:
-	mkdir -p target
+$(TARGET_PATH):
+	mkdir -p $(TARGET_PATH)
 
 .PHONY: clean
 clean:
-	rm -rf target
+	rm -rf $(TARGET_PATH)
