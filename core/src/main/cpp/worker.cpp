@@ -395,18 +395,17 @@ struct WorkerClientSendHandler {
               // sendRow
               ENSURE(ntohl(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
-              uint64_t rowIdx = ntohll(*(uint64_t*)dataPtr);
+              uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
               auto localRowOffsetIter = std::find(localRowIndices.begin(), localRowIndices.end(), rowIdx);
               ENSURE(localRowOffsetIter != localRowIndices.end());
               auto localRowOffset = localRowOffsetIter - localRowIndices.begin();
-              *reinterpret_cast<uint64_t*>(&outbuf[0]) = htonll(numCols * 8);
-              // treat the output as uint64_t[] instead of double[] to avoid type punning issues with htonll
+              *reinterpret_cast<uint64_t*>(&outbuf[0]) = be64toh(numCols * 8);
+              // treat the output as uint64_t[] instead of double[] to avoid type punning issues with be64toh
               auto invals = reinterpret_cast<const uint64_t*>(&localData[numCols * localRowOffset]);
               auto outvals = reinterpret_cast<uint64_t*>(&outbuf[8]);
               for(uint64_t idx = 0; idx < numCols; ++idx) {
-                // can't use std::transform since htonll is a macro (on macOS)
-                outvals[idx] = htonll(invals[idx]);
+                outvals[idx] = be64toh(invals[idx]);
               }
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
@@ -520,10 +519,10 @@ struct WorkerClientReceiveHandler {
               size_t numCols = matrix->Width();
               ENSURE(ntohl(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
-              uint64_t rowIdx = ntohll(*(uint64_t*)dataPtr);
+              uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
               ENSURE(rowIdx < (size_t)matrix->Height());
-              ENSURE(ntohll(*(uint64_t*)dataPtr) == numCols * 8);
+              ENSURE(htobe64(*(uint64_t*)dataPtr) == numCols * 8);
               dataPtr += 8;
               matrix->Reserve(numCols);
               for(size_t colIdx = 0; colIdx < numCols; ++colIdx) {

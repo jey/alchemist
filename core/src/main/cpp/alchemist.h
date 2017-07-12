@@ -12,6 +12,8 @@
 #include <cstdio>
 #include <memory>
 #include <unistd.h>
+#include <endian.h>
+#include <arpa/inet.h>
 #include <eigen3/Eigen/Dense>
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)

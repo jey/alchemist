@@ -14,12 +14,12 @@ union DoubleBytes {
 inline uint64_t htond(double value) {
   DoubleBytes d;
   d.value = value;
-  return htonll(d.qword);
+  return be64toh(d.qword);
 }
 
 inline double ntohd(uint64_t qword) {
   DoubleBytes d;
-  d.qword = ntohll(qword);
+  d.qword = htobe64(qword);
   return d.value;
 }
 
@@ -48,7 +48,7 @@ struct DataInputStream {
     uint64_t val;
     is.read(reinterpret_cast<char*>(&val), sizeof(val));
     if(!is) throw IOError();
-    val = ntohll(val);
+    val = htobe64(val);
     return val;
   }
 
@@ -80,7 +80,7 @@ struct DataOutputStream {
   }
 
   void writeLong(uint64_t val) {
-    val = htonll(val);
+    val = be64toh(val);
     os.write(reinterpret_cast<const char*>(&val), sizeof(val));
     if(!os) throw IOError();
   }

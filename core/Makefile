@@ -10,31 +10,36 @@ include $(EL_PATH)/conf/ElVars
 
 SRC_PATH = src/main
 
-CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH)
-#CXXFLAGS += -O0
-LDFLAGS += $(EL_LINK_FLAGS) -Wl,-rpath,$(EL_LIB) $(EL_LIBS)
-LDFLAGS += -lboost_serialization -lboost_mpi
-LDFLAGS += -larpack
-
 ifdef ALPREFIX
   LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 endif
 
-CXX_SRCS = \
-	$(SRC_PATH)/cpp/alchemist.cpp \
-	$(SRC_PATH)/cpp/driver.cpp \
-	$(SRC_PATH)/cpp/worker.cpp \
+ifdef BOOST_DIR
+  CXXFLAGS += "-I$(BOOST_DIR)/include"
+  LDFLAGS += "-L$(BOOST_DIR)/lib" "-Wl,-rpath,$(BOOST_DIR)/lib"
+endif
+
+CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH)
+#CXXFLAGS += -O0
+LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
+LDFLAGS += -lboost_serialization -lboost_mpi
+LDFLAGS += -larpack
+
+CXX_OBJS = \
+	$(SRC_PATH)/cpp/alchemist.o \
+	$(SRC_PATH)/cpp/driver.o \
+	$(SRC_PATH)/cpp/worker.o \
 	#
 
 .PHONY: default
 default: target/alchemist
 
-target/alchemist: target $(SRC_PATH)/cpp/alchemist.h $(CXX_SRCS)
-	$(CXX) $(CXXFLAGS) -o $@ $(CXX_SRCS) $(LDFLAGS)
+target/alchemist: target $(SRC_PATH)/cpp/alchemist.h $(CXX_OBJS)
+	$(CXX) -dynamic $(CXXFLAGS) -o $@ $(CXX_OBJS) $(LDFLAGS)
 
 target:
 	mkdir -p target
 
 .PHONY: clean
 clean:
-	rm -rf target
+	rm -rf target $(CXX_OBJS)
