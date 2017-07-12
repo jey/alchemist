@@ -64,7 +64,7 @@ uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & c
 
 // TODO: add seed as argument (make sure different workers do different things)
 void kmeansParallelInit(Worker * self, DistMatrix const * dataMat, 
-    MatrixXd const & localData, uint32_t scale, uint32_t initSteps, MatrixXd & clusterCenters) {
+    MatrixXd const & localData, uint32_t scale, uint32_t initSteps, MatrixXd & clusterCenters, uint64_t seed) {
 
   auto d = localData.cols();
 
@@ -93,11 +93,10 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
   // cluster centers and add the sampled points to the set of cluster centers
   std::vector<double> distSqToCenters(localData.rows());
   double Z; // normalization constant
-  std::random_device rd; // gives seed
-  std::mt19937 gen(rd());
+  std::mt19937 gen(seed + self->world.rank());
   std::uniform_real_distribution<double> dis(0, 1);
 
-  std::vector<VectorXd> initCenters;
+  std::vector<MatrixXd> initCenters;
   initCenters.push_back(initialCenter);
 
   for(int steps = 0; steps < initSteps; ++steps) {
@@ -114,11 +113,11 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
     mpi::all_reduce(self->peers, mpi::inplace_t<double>(Z), std::plus<double>());
 
     // 2) sample your points accordingly 
-    std::vector<VectorXd> localNewCenters;
+    std::vector<MatrixXd> localNewCenters;
     for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
       bool sampledQ = ((scale * dis(gen)) < (distSqToCenters[pointIdx]/Z)) ? true : false;
       if (sampledQ) {
-        VectorXd newCenter = localData.row(pointIdx);
+        MatrixXd newCenter = localData.row(pointIdx);
         localNewCenters.push_back(newCenter);
       }
     };
@@ -130,7 +129,7 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
         mpi::broadcast(self->peers, localNewCenters, root);
         initCenters.insert(initCenters.begin(), localNewCenters.begin(), localNewCenters.end());
       } else {
-        std::vector<VectorXd> remoteNewCenters;
+        std::vector<MatrixXd> remoteNewCenters;
         mpi::broadcast(self->peers, remoteNewCenters, root);
         initCenters.insert(initCenters.begin(), remoteNewCenters.begin(), remoteNewCenters.end());
       }
@@ -206,23 +205,27 @@ void KMeansCommand::run(Worker *self) const {
     }
 
   MatrixXd clusterCenters(numCenters, d);
+  MatrixXd oldClusterCenters(numCenters, d);
 
   // initialize centers using kMeans||
   uint32_t scale = 2*numCenters;
-  kmeansParallelInit(self, dataMat, localData, scale, initSteps, clusterCenters);
+  kmeansParallelInit(self, dataMat, localData, scale, initSteps, clusterCenters, seed);
 
   // TODO: allow to initialize k-means randomly
   //MatrixXd clusterCenters = MatrixXd::Random(numCenters, d);
 
+  /******** START Lloyd's iterations ********/
   // compute the local cluster assignments
   std::unique_ptr<uint32_t[]> counts{new uint32_t[numCenters]};
   std::vector<uint32_t> rowAssignments(localData.rows());
   VectorXd distanceSq(numCenters);
+
   updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
 
   MatrixXd centersBuf(numCenters, d);
   std::unique_ptr<uint32_t[]> countsBuf{new uint32_t[numCenters]};
   uint32_t numChanged = 0;
+  oldClusterCenters = clusterCenters;
 
   while(true) {
     uint32_t nextCommand;
@@ -230,13 +233,25 @@ void KMeansCommand::run(Worker *self) const {
 
     if (nextCommand == 0xf)  // finished iterating
       break;
-    else if (nextCommand == 2) { // reinitialize cluster centers  TODO: make this work for kmeansParallel as well
-      clusterCenters = MatrixXd::Random(numCenters, d);
+    else if (nextCommand == 2) { // encountered an empty cluster, so randomly pick a point in the dataset as that cluster's centroid
+      uint32_t clusterIdx, rowIdx;
+      mpi::broadcast(self->world, clusterIdx, 0);
+      mpi::broadcast(self->world, rowIdx, 0);
+      if (dataMat->IsLocalRow(rowIdx)) {
+        auto localRowIdx = dataMat->LocalRow(rowIdx);
+        clusterCenters.row(clusterIdx) = localData.row(localRowIdx);
+      }
+      mpi::broadcast(self->peers, clusterCenters, self->peers.rank());
       updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
+      self->world.barrier();
+      continue;
     }
+
+    /******** do a regular Lloyd's iteration ********/
 
     // update the centers
     // TODO: locally compute cluster sums and place in clusterCenters
+    oldClusterCenters = clusterCenters;
     clusterCenters.setZero();
     for(uint32_t rowIdx = 0; rowIdx < localData.rows(); ++rowIdx) 
       clusterCenters.row(rowAssignments[rowIdx]) += localData.row(rowIdx);
@@ -257,6 +272,10 @@ void KMeansCommand::run(Worker *self) const {
     mpi::reduce(self->world, numChanged, std::plus<int>(), 0);
     // return the cluster counts
     mpi::reduce(self->world, counts.get(), numCenters, std::plus<uint32_t>(), 0);
+    if (self->peers.rank() == 1) {
+      bool movedQ = (clusterCenters - oldClusterCenters).rowwise().norm().minCoeff() > changeThreshold;
+      self->world.send(0, 0, movedQ);
+    }
   }
 
   // write the final k-means centers and assignments

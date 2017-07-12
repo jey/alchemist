@@ -21,6 +21,7 @@ ifdef ALPREFIX
 endif
 
 CXX_SRCS = \
+	$(SRC_PATH)/cpp/kmeans++.cpp \
 	$(SRC_PATH)/cpp/alchemist.cpp \
 	$(SRC_PATH)/cpp/driver.cpp \
 	$(SRC_PATH)/cpp/worker.cpp \

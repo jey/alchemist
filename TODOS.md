@@ -1,6 +1,7 @@
 * need a plugin architecture desperately for code maintenance reasons
 * need a unified logging interface desperately for profiling and debugging
 * need to separate the tests and have more coverage
+* need a testing framework that lets you debug the CPP code w/o having to wait on the scala code to compile and run, and avoids mixing the output with scala messages
 
 * add ability to store/receive/send local matrices from driver
 * allow directly specifying how matrices should be laid out when passing them in to Alchemist
@@ -12,4 +13,4 @@
 * need to extend truncatedSVD, currently assumes matrix is tall and skinny
 * need to fix kMeans on Spark and Alchemist side to use all the options passed in
 * need to fix kMeans on Alchemist side to use the seed appropriately on driver and workers
-* need to fix kMeans on Alchemist side to use a non-trivial default seed
+* need to go through and uniformatize the datatype used for row/col indices (e.g. am sure in kmeans code, am using uint32_t for sampling row indices, but the rows can be longs)

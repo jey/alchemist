@@ -60,6 +60,9 @@ typedef El::AbstractDistMatrix<double> DistMatrix;
 typedef uint32_t WorkerId;
 
 
+void kmeansPP(uint32_t seed, std::vector<Eigen::MatrixXd> points, std::vector<double> weights, 
+    Eigen::MatrixXd & fitCenters, uint32_t maxIters);
+
 struct Worker;
 
 struct MatrixHandle {

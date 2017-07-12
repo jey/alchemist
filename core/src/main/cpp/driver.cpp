@@ -229,13 +229,18 @@ void Driver::handle_kmeansClustering() {
   world.barrier(); // wait for workers to return oversampled cluster centers and sizes
 
   std::vector<uint32_t> clusterSizes;
-  std::vector<VectorXd> initClusterCenters;
+  std::vector<MatrixXd> initClusterCenters;
   world.recv(1, mpi::any_tag, clusterSizes);
   world.recv(1, mpi::any_tag, initClusterCenters);
   world.barrier();
 
   // use kmeans++ locally to find the initial cluster centers
+  std::vector<double> weights;
+  weights.reserve(clusterSizes.size());
+  std::for_each(clusterSizes.begin(), clusterSizes.end(), [&weights](const uint32_t & cnt){ weights.push_back((double) cnt); });
   MatrixXd clusterCenters(numCenters, d);
+
+  kmeansPP(gen(), initClusterCenters, weights, clusterCenters, 30); // same number of maxIters as spark kmeans
 
   mpi::broadcast(world, clusterCenters, 0);
   /******** END of kMeans|| initialization ********/
@@ -271,8 +276,11 @@ void Driver::handle_kmeansClustering() {
         // as that cluster's centroid
         centersMovedQ = true;
         command = 2; // reinitialize this cluster center
+        uint32_t rowIdx = dis(gen);
         mpi::broadcast(world, command, 0);
         mpi::broadcast(world, clusterIdx, 0);
+        mpi::broadcast(world, rowIdx, 0);
+        world.barrier();
       }
     }
 
