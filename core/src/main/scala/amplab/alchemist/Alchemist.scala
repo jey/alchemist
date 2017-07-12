@@ -127,9 +127,11 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
   output.writeInt(0xABCD)
   output.writeInt(0x1)
   output.flush()
+  System.err.println("Spark Driver: wrote handshake")
   if(input.readInt() != 0xDCBA || input.readInt() != 0x1) {
     throw new ProtocolError()
   }
+  System.err.println("Spark Driver: got handshake")
 
   val workerCount = input.readInt()
 
@@ -296,9 +298,10 @@ class Driver {
   val driverProc: Process = {
     val pb = {
       if(System.getenv("NERSC_HOST") != null) {
-        throw new NotImplementedError()
         val hostfilePath = s"${System.getenv("SPARK_WORKER_DIR")}/slaves.alchemist"
-        new ProcessBuilder("srun", "-O", "-I30", "-N", "2", "-w", hostfilePath, "core/target/alchemist")
+        val rootpath = "/global/cscratch1/sd/jeyk/alchemist/alchemist"
+        val errpath = s"${System.getenv("SPARK_WORKER_DIR")}/alchemist-%j-%s-%t-%N.log"
+        new ProcessBuilder("srun", "--input=0", "--output=0", "--error", errpath, "-Q", "-O", "-I30", "-N", "2", "-w", hostfilePath, s"${rootpath}/core/target/alchemist")
       } else {
         new ProcessBuilder("mpirun", "-q", "-np", "4", "core/target/alchemist")
       }
