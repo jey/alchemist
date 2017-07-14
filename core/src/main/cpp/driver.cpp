@@ -234,11 +234,11 @@ void Driver::handle_kmeansClustering() {
   world.recv(1, mpi::any_tag, initClusterCenters);
   world.barrier();
 
-  std::cerr << "Retrieved the k-means|| oversized cluster centers\n";
-  std::cerr << "Refined to these centers: \n";
-  for(uint32_t centerIdx = 0; centerIdx < numCenters; centerIdx++) {
+  std::cerr << "Retrieved the k-means|| oversized cluster centers:\n";
+  for(uint32_t centerIdx = 0; centerIdx < initClusterCenters.size(); centerIdx++) {
     std::cerr << initClusterCenters[centerIdx] << std::endl;
   }
+  std::cerr << std::flush;
 
   // use kmeans++ locally to find the initial cluster centers
   std::vector<double> weights;
@@ -248,7 +248,12 @@ void Driver::handle_kmeansClustering() {
 
   kmeansPP(gen(), initClusterCenters, weights, clusterCenters, 30); // same number of maxIters as spark kmeans
 
-  mpi::broadcast(world, clusterCenters, 0);
+  std::cerr << "Ran local k-means on the driver; starting cluster centers:\n";
+  for(uint32_t centerIdx = 0; centerIdx < clusterCenters.rows(); centerIdx++) {
+    std::cerr << clusterCenters.row(centerIdx) << std::endl;
+  }
+
+  mpi::broadcast(world, clusterCenters.data(), numCenters*d, 0);
   /******** END of kMeans|| initialization ********/
 
   /******** START of Lloyd's algorithm iterations ********/
@@ -273,8 +278,11 @@ void Driver::handle_kmeansClustering() {
     mpi::broadcast(world, command, 0);
     mpi::reduce(world, (uint32_t) 0, numChanged, std::plus<int>(), 0);
     mpi::reduce(world, zerosVector.data(), numCenters, parClusterSizes.data(), std::plus<uint32_t>(), 0);
+    std::cerr << "recerived cluster counts\n" << std::flush;
     world.recv(1, mpi::any_tag, centersMovedQ);
     percentAssignmentsChanged = ((double) numChanged)/n;
+
+    std::cerr << "calc percentageAssignmentsChanged\n" << std::flush;
       
     for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++) {
       if (parClusterSizes[clusterIdx] == 0) {

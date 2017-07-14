@@ -147,9 +147,11 @@ object BasicSuite {
   def kmeansTestMatrix(sc : SparkContext, numRows : Int, numCols: Int, numCenters: Int) : Tuple2[Array[Int], IndexedRowMatrix] = {
     assert(numCols >= numCenters)
     val rowAssignments = Array.fill(numRows)(scala.util.Random.nextInt(numCenters))
-    val mat = BDM.zeros[Double](numRows, numCols)
-    (0 until numRows).foreach{ i : Int => mat(i, rowAssignments(i)) = numCols }
-    val rows = sc.parallelize( (0 until numRows).map( i => mat(i, ::).t.toArray )).zipWithIndex
+    val trueMat = BDM.zeros[Double](numRows, numCols)
+    (0 until numRows).foreach{ i : Int => trueMat(i, rowAssignments(i)) = numCols }
+    val noiseMat = BDM.rand[Double](numRows, numCols)*.01
+    val totalMat = trueMat + noiseMat
+    val rows = sc.parallelize( (0 until numRows).map( i => totalMat(i, ::).t.toArray )).zipWithIndex
     val indexedMat = new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, new DenseVector(x._1))))
     (rowAssignments, indexedMat)
   }

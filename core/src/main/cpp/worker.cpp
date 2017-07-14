@@ -108,17 +108,16 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
       for(uint32_t centerIdx = 0; centerIdx < initCenters.size(); ++centerIdx) 
         distSq[centerIdx] = (localData.row(pointIdx) - initCenters[centerIdx]).squaredNorm();
       distSqToCenters[pointIdx] = distSq.minCoeff();
-      Z += distSqToCenters[rowIdx];
+      Z += distSqToCenters[pointIdx];
     }
     mpi::all_reduce(self->peers, mpi::inplace_t<double>(Z), std::plus<double>());
 
     // 2) sample your points accordingly 
     std::vector<MatrixXd> localNewCenters;
     for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
-      bool sampledQ = ((scale * dis(gen)) < (distSqToCenters[pointIdx]/Z)) ? true : false;
+      bool sampledQ = ( dis(gen) < ((double)scale) * distSqToCenters[pointIdx]/Z ) ? true : false;
       if (sampledQ) {
-        MatrixXd newCenter = localData.row(pointIdx);
-        localNewCenters.push_back(newCenter);
+        localNewCenters.push_back(localData.row(pointIdx));
       }
     };
     
@@ -127,11 +126,11 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
     for(uint32_t root= 0; root < self->peers.size(); ++root) {
       if (root == self->peers.rank()) {
         mpi::broadcast(self->peers, localNewCenters, root);
-        initCenters.insert(initCenters.begin(), localNewCenters.begin(), localNewCenters.end());
+        initCenters.insert(initCenters.end(), localNewCenters.begin(), localNewCenters.end());
       } else {
         std::vector<MatrixXd> remoteNewCenters;
         mpi::broadcast(self->peers, remoteNewCenters, root);
-        initCenters.insert(initCenters.begin(), remoteNewCenters.begin(), remoteNewCenters.end());
+        initCenters.insert(initCenters.end(), remoteNewCenters.begin(), remoteNewCenters.end());
       }
     }
   } // end for
@@ -160,8 +159,8 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
   }
   self->world.barrier();
 
-  // now set the cluster centers using the driver's output
-  mpi::broadcast(self->world, clusterCenters, 0);
+  clusterCenters.setZero();
+  mpi::broadcast(self->world, clusterCenters.data(), clusterCenters.rows()*d, 0);
 }
 
 // TODO: add seed as argument (make sure different workers do different things)
@@ -209,6 +208,7 @@ void KMeansCommand::run(Worker *self) const {
 
   // initialize centers using kMeans||
   uint32_t scale = 2*numCenters;
+  clusterCenters.setZero();
   kmeansParallelInit(self, dataMat, localData, scale, initSteps, clusterCenters, seed);
 
   // TODO: allow to initialize k-means randomly
@@ -267,12 +267,14 @@ void KMeansCommand::run(Worker *self) const {
 
     // compute new local assignments
     numChanged = updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
+    std::cerr << "computed Updated assingments\n" << std::flush;
 
     // return the number of changed assignments
     mpi::reduce(self->world, numChanged, std::plus<int>(), 0);
     // return the cluster counts
     mpi::reduce(self->world, counts.get(), numCenters, std::plus<uint32_t>(), 0);
-    if (self->peers.rank() == 1) {
+    std::cerr << "returned cluster counts\n" << std::flush;
+    if (self->world.rank() == 1) {
       bool movedQ = (clusterCenters - oldClusterCenters).rowwise().norm().minCoeff() > changeThreshold;
       self->world.send(0, 0, movedQ);
     }
