@@ -17,3 +17,4 @@ check:
 clean:
 	$(MAKE) -C core clean
 	sbt -batch clean
+	rm *.log
