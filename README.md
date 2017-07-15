@@ -65,6 +65,18 @@ cd ../..
 rm -rf eigen-eigen-5a0156e40feb
 ```
 
+## Install SPDLog into ALPREFIX
+```
+git clone https://github.com/gabime/spdlog.git
+cd spdlog
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+make install
+cd ../..
+rm -rf spdlog
+```
+
 ## Install Arpack-ng into ALPREFIX 
 ```
 git clone https://github.com/opencollab/arpack-ng.git

@@ -4,6 +4,7 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.linalg.{DenseMatrix, DenseVector, SingularValueDecomposition, Matrix}
 import org.apache.spark.mllib.linalg.distributed.{IndexedRow, IndexedRowMatrix}
 import org.apache.spark.mllib.random.{RandomRDDs}
+import org.apache.spark.mllib.clustering.KMeans
 import breeze.linalg.{DenseVector => BDV, max, min, DenseMatrix => BDM, norm, diag, svd}
 import breeze.numerics._
 
@@ -59,7 +60,8 @@ object BasicSuite {
     //val alMatATransposeLocalMat = toLocalMatrix(alMatATranspose.getIndexedRowMatrix())
     //println(norm((alMatATransposeLocalMat - toLocalMatrix(alMatA.getIndexedRowMatrix).t).toDenseVector))
 
-    // TEST: check k-means
+    /*
+    // TEST: basic check k-means
     val n : Int = 30;
     val d : Int = 20;
     val k : Int = 5
@@ -75,6 +77,29 @@ object BasicSuite {
     println(rowAssignments.groupBy(_ + 0).mapValues(_.length).toList)
     println(alAssignmentsLocalMat.data.groupBy(_ + 0).mapValues(_.length).toList)
     
+    */
+    // TEST: larger k-means
+    val n : Int = 10000;
+    val d : Int = 780;
+    val k : Int = 10;
+    val maxIters : Int = 100
+    val threshold : Double = 1e-4
+    val noiseLevel : Double = 2.0*d
+    val (rowAssignments, matKMeans) = kmeansTestMatrix(sc, n, d, k, noiseLevel)
+    val alMatkMeans = AlMatrix(al, matKMeans)
+    val kmeansStart = System.nanoTime
+    val (alCenters, alAssignments, numIters) = al.kMeans(alMatkMeans, k, maxIters, threshold)
+    val kmeansDuration = (System.nanoTime - kmeansStart)/1e9d
+
+    
+    val sparkKmeansStart = System.nanoTime
+    val clusters = KMeans.train(matKMeans.rows.map(pair => pair.vector), k, maxIters)
+    val sparkKmeansDuration = (System.nanoTime - sparkKmeansStart)/1e9d
+
+    println(s"Alchemist kmeans: ${kmeansDuration}")
+    println(s"Alchemist iters: ${numIters}")
+    println(s"Spark kmeans: ${sparkKmeansDuration}")
+
     /*
     // TEST truncatedSVD
     val k : Int = 10;
@@ -144,12 +169,12 @@ object BasicSuite {
     new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, x._1)))
   }
 
-  def kmeansTestMatrix(sc : SparkContext, numRows : Int, numCols: Int, numCenters: Int) : Tuple2[Array[Int], IndexedRowMatrix] = {
+  def kmeansTestMatrix(sc : SparkContext, numRows : Int, numCols: Int, numCenters: Int, noiseLevel : Double) : Tuple2[Array[Int], IndexedRowMatrix] = {
     assert(numCols >= numCenters)
     val rowAssignments = Array.fill(numRows)(scala.util.Random.nextInt(numCenters))
     val trueMat = BDM.zeros[Double](numRows, numCols)
     (0 until numRows).foreach{ i : Int => trueMat(i, rowAssignments(i)) = numCols }
-    val noiseMat = BDM.rand[Double](numRows, numCols)*.01
+    val noiseMat = 2.0*(BDM.rand[Double](numRows, numCols) - .5)*noiseLevel
     val totalMat = trueMat + noiseMat
     val rows = sc.parallelize( (0 until numRows).map( i => totalMat(i, ::).t.toArray )).zipWithIndex
     val indexedMat = new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, new DenseVector(x._1))))

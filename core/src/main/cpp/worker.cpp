@@ -1,5 +1,4 @@
 #include "alchemist.h"
-
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
@@ -9,12 +8,10 @@
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include "spdlog/spdlog.h"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
-
-// assuming SRC is a row-major Eigen matrix, copies row ROW of it to the double array DEST
-#define copyEigenRowToArrayMACRO(DEST, SRC, ROW) std::memcpy(DEST, SRC.data() + SRC.cols()*(ROW), SRC.cols()*sizeof(double))
 
 namespace alchemist {
 
@@ -26,6 +23,7 @@ struct Worker {
   bool shouldExit;
   int listenSock;
   std::map<MatrixHandle, std::unique_ptr<DistMatrix>> matrices;
+  std::shared_ptr<spdlog::logger> log;
 
   Worker(const mpi::communicator &world, const mpi::communicator &peers) :
       id(world.rank() - 1), world(world), peers(peers), grid(El::mpi::Comm(peers)),
@@ -40,11 +38,12 @@ struct Worker {
 };
 
 uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & centers, 
-    uint32_t * clusterSizes, std::vector<uint32_t> & rowAssignments) {
+    uint32_t * clusterSizes, std::vector<uint32_t> & rowAssignments, double & objVal) {
   uint32_t numCenters = centers.rows();
   VectorXd distanceSq(numCenters);
   El::Int newAssignment;
   uint32_t numChanged = 0;
+  objVal = 0.0;
 
   for(uint32_t idx = 0; idx < numCenters; ++idx) 
     clusterSizes[idx] = 0; 
@@ -52,7 +51,7 @@ uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & c
   for(El::Int rowIdx = 0; rowIdx < dataMat.rows(); ++rowIdx) {
     for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) 
       distanceSq[centerIdx] = (dataMat.row(rowIdx) - centers.row(centerIdx)).squaredNorm();
-    distanceSq.minCoeff(&newAssignment);
+    objVal += distanceSq.minCoeff(&newAssignment);
     if (rowAssignments[rowIdx] != newAssignment) 
       numChanged += 1;
     rowAssignments[rowIdx] = newAssignment;
@@ -165,6 +164,8 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
 
 // TODO: add seed as argument (make sure different workers do different things)
 void KMeansCommand::run(Worker *self) const {
+  auto log = self->log;
+  log->info("Started kmeans");
   auto origDataMat = self->matrices[origMat].get();
   auto n = origDataMat->Height();
   auto d = origDataMat->Width();
@@ -176,11 +177,10 @@ void KMeansCommand::run(Worker *self) const {
   if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
    dataMat = origDataMat;
   } else {
-    std::cerr << self->world.rank() << ": detected matrix is not row-partitioned, so relayout-ing to row-partitioned\n";
     auto relayoutStart = std::chrono::system_clock::now();
     El::Copy(*origDataMat, *dataMat); // relayouts data so it is row-wise partitioned
     std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - relayoutStart);
-    std::cerr << self->world.rank() << ": relayout took " << relayoutDuration.count() << "ms\n";
+    log->info("Detected matrix is not row-partitioned, so relayouted to row-partitioned; took {} ms ", relayoutDuration.count());
   }
 
   // TODO: store these as local matrices on the driver
@@ -219,8 +219,9 @@ void KMeansCommand::run(Worker *self) const {
   std::unique_ptr<uint32_t[]> counts{new uint32_t[numCenters]};
   std::vector<uint32_t> rowAssignments(localData.rows());
   VectorXd distanceSq(numCenters);
+  double objVal;
 
-  updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
+  updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments, objVal);
 
   MatrixXd centersBuf(numCenters, d);
   std::unique_ptr<uint32_t[]> countsBuf{new uint32_t[numCenters]};
@@ -242,7 +243,7 @@ void KMeansCommand::run(Worker *self) const {
         clusterCenters.row(clusterIdx) = localData.row(localRowIdx);
       }
       mpi::broadcast(self->peers, clusterCenters, self->peers.rank());
-      updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
+      updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments, objVal);
       self->world.barrier();
       continue;
     }
@@ -266,7 +267,7 @@ void KMeansCommand::run(Worker *self) const {
         clusterCenters.row(rowIdx) /= counts[rowIdx];
 
     // compute new local assignments
-    numChanged = updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments);
+    numChanged = updateAssignmentsAndCounts(localData, clusterCenters, counts.get(), rowAssignments, objVal);
     std::cerr << "computed Updated assingments\n" << std::flush;
 
     // return the number of changed assignments
@@ -299,6 +300,7 @@ void KMeansCommand::run(Worker *self) const {
   std::chrono::duration<double, std::milli> kMeansWrite_duration(std::chrono::system_clock::now() - startKMeansWrite);
   std::cerr << self->world.rank() << ": writing the k-means centers and assignments took " << kMeansWrite_duration.count() << "ms\n";
 
+  mpi::reduce(self->world, objVal, std::plus<double>(), 0);
   self->world.barrier();
 }
 
@@ -797,6 +799,17 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId
 }
 
 int Worker::main() {
+  // log to console as well as file (single-threaded logging)
+  // TODO: allow to specify log directory, log level, etc.
+  std::vector<spdlog::sink_ptr> sinks;
+//  sinks.push_back(std::make_shared_ptr<spdlog::sinks::stdout_sink_st>()); // without ANSI color
+  sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>()); // with ANSI color
+  sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("rank-%d.log") % world.rank())));
+  log = std::make_shared<spdlog::logger>( str(format("worker-%d") % world.rank()), 
+      std::begin(sinks), std::end(sinks));
+  log->flush_on(spdlog::level::warn);
+  log->info("Started worker");
+
   // create listening socket, bind to an available port, and get the port number
   ENSURE((listenSock = socket(AF_INET, SOCK_STREAM, 0)) != -1);
   sockaddr_in addr = {AF_INET};

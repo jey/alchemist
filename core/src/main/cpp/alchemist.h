@@ -14,6 +14,7 @@
 #include <memory>
 #include <unistd.h>
 #include <eigen3/Eigen/Dense>
+#include "spdlog/fmt/fmt.h"
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
@@ -23,31 +24,6 @@
 #define ENSURE(x) do { if(!(x)) { \
   fprintf(stderr, "FATAL: invariant violated: %s:%d: %s\n", __FILE__, __LINE__, #x); fflush(stderr); abort(); } while(0)
 #endif
-
-namespace boost { namespace serialization {
-	template< class Archive,
-						class S,
-						int Rows_,
-						int Cols_,
-						int Ops_,
-						int MaxRows_,
-						int MaxCols_>
-	inline void serialize(Archive & ar, 
-		Eigen::Matrix<S, Rows_, Cols_, Ops_, MaxRows_, MaxCols_> & matrix, 
-		const unsigned int version)
-	{
-		int rows = matrix.rows();
-		int cols = matrix.cols();
-		ar & make_nvp("rows", rows);
-		ar & make_nvp("cols", cols);    
-		matrix.resize(rows, cols); // no-op if size does not change!
-
-		// always save/load col-major
-		for(int c = 0; c < cols; ++c)
-			for(int r = 0; r < rows; ++r)
-				ar & make_nvp("val", matrix(r,c));
-	}
-}} // namespace boost::serialization
 
 namespace alchemist {
 
@@ -317,6 +293,62 @@ int driverMain(const mpi::communicator &world);
 int workerMain(const mpi::communicator &world, const mpi::communicator &peers);
 
 } // namespace alchemist
+
+namespace fmt {
+  // for displaying Eigen expressions. Note, if you include spdlog/fmt/ostr.h, this will be 
+  // hidden by the ostream<< function for Eigen objects
+  template<typename ArgFormatter, typename Derived>
+  inline void format(BasicFormatter<char, ArgFormatter> &f,
+      const char *&format_str, const Eigen::MatrixBase<Derived> &exp) {
+    std::stringstream buf;
+    buf << "Eigen matrix " << std::endl << exp;
+    f.writer().write("{}", buf.str()); 
+  }
+
+  // for displaying vectors
+  template <typename T, typename A>
+  inline void format(BasicFormatter<char> &f, 
+      const char *&format_str, const std::vector<T,A> &vec) {
+    std::stringstream buf;
+    buf << "Vector of length " << vec.size() << std::endl << "{";
+    for(typename std::vector<T>::size_type pos=0; pos < vec.size()-1; ++pos) {
+      buf << vec[pos] << "," << std::endl;
+    }
+    buf << vec[vec.size()-1] << "}";
+    f.writer().write("{}", buf.str());
+  }
+
+  inline void format(BasicFormatter<char> &f,
+      const char *&format_str, const alchemist::MatrixHandle &handle) {
+    f.writer().write("[{}]", handle.id);
+  }
+}
+
+namespace boost { namespace serialization {
+  // to serialize Eigen Matrix objects
+	template< class Archive,
+						class S,
+						int Rows_,
+						int Cols_,
+						int Ops_,
+						int MaxRows_,
+						int MaxCols_>
+	inline void serialize(Archive & ar, 
+		Eigen::Matrix<S, Rows_, Cols_, Ops_, MaxRows_, MaxCols_> & matrix, 
+		const unsigned int version)
+	{
+		int rows = matrix.rows();
+		int cols = matrix.cols();
+		ar & make_nvp("rows", rows);
+		ar & make_nvp("cols", cols);    
+		matrix.resize(rows, cols); // no-op if size does not change!
+
+		// always save/load col-major
+		for(int c = 0; c < cols; ++c)
+			for(int r = 0; r < rows; ++r)
+				ar & make_nvp("val", matrix(r,c));
+	}
+}} // namespace boost::serialization
 
 BOOST_CLASS_EXPORT_KEY(alchemist::Command);
 BOOST_CLASS_EXPORT_KEY(alchemist::HaltCommand);
