@@ -8,7 +8,7 @@ sbt -batch assembly
 
 # user specified
 PROJ_HOME="$HOME/Documents/alchemist"
-MASTER="local[4]"
+MASTER="local[3]"
 TARGET_DIM="30"
 
 # the rest does not need change

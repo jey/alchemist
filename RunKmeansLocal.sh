@@ -9,7 +9,7 @@ sbt -batch assembly
 
 # user specified
 PROJ_HOME="$HOME/Documents/alchemist"
-MASTER="local[4]"
+MASTER="local[3]"
 CLUSTER_NUM="10"
 MAX_ITERS="100"
 

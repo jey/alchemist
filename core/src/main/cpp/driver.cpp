@@ -81,7 +81,7 @@ int Driver::main() {
   bool shouldExit = false;
   while(!shouldExit) {
     uint32_t typeCode = input.readInt();
-    log->info("Recieved code {#x}", typeCode);
+    log->info("Received code {#x}", typeCode);
 
     switch(typeCode) {
       // shutdown
