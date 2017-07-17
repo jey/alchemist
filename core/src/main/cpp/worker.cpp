@@ -554,11 +554,11 @@ struct WorkerClientSendHandler {
           ENSURE(inpos <= inbuf.size());
           if(inpos >= 4) {
             char *dataPtr = &inbuf[0];
-            uint32_t typeCode = ntohl(*(uint32_t*)dataPtr);
+            uint32_t typeCode = be64toh(*(uint32_t*)dataPtr);
             dataPtr += 4;
             if(typeCode == 0x3 && inpos == inbuf.size()) {
               // sendRow
-              ENSURE(ntohl(*(uint32_t*)dataPtr) == handle.id);
+              ENSURE(be64toh(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
@@ -677,12 +677,12 @@ struct WorkerClientReceiveHandler {
           ENSURE(pos <= inbuf.size());
           if(pos >= 4) {
             char *dataPtr = &inbuf[0];
-            uint32_t typeCode = ntohl(*(uint32_t*)dataPtr);
+            uint32_t typeCode = be64toh(*(uint32_t*)dataPtr);
             dataPtr += 4;
             if(typeCode == 0x1 && pos == inbuf.size()) {
               // addRow
               size_t numCols = matrix->Width();
-              ENSURE(ntohl(*(uint32_t*)dataPtr) == handle.id);
+              ENSURE(be64toh(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
@@ -818,7 +818,7 @@ int Worker::main() {
   socklen_t addrlen = sizeof(addr);
   ENSURE(getsockname(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen) == 0);
   ENSURE(addrlen == sizeof(addr));
-  uint16_t port = ntohs(addr.sin_port);
+  uint16_t port = be16toh(addr.sin_port);
 
   // transmit WorkerInfo to driver
   char hostname[256];
