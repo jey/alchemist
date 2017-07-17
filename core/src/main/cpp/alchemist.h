@@ -3,6 +3,7 @@
 
 #include <El.hpp>
 #include <boost/serialization/serialization.hpp>
+#include <boost/serialization/vector.hpp>
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/export.hpp>
 #include <boost/format.hpp>
@@ -15,6 +16,34 @@
 #include <arpa/inet.h>
 #include <eigen3/Eigen/Dense>
 #include "endian.h"
+#include "spdlog/fmt/fmt.h"
+
+#ifdef __APPLE__
+	#include <machine/endian.h>
+	#include <libkern/OSByteOrder.h>
+	
+	#define htobe16(x) OSSwapHostToBigInt16(x)
+	#define htole16(x) OSSwapHostToLittleInt16(x)
+	#define be16toh(x) OSSwapBigToHostInt16(x)
+	#define le16toh(x) OSSwapLittleToHostInt16(x)
+	
+	#define htobe32(x) OSSwapHostToBigInt32(x)
+	#define htole32(x) OSSwapHostToLittleInt32(x)
+	#define be32toh(x) OSSwapBigToHostInt32(x)
+	#define le32toh(x) OSSwapLittleToHostInt32(x)
+	
+	#define htobe64(x) OSSwapHostToBigInt64(x)
+	#define htole64(x) OSSwapHostToLittleInt64(x)
+	#define be64toh(x) OSSwapBigToHostInt64(x)
+	#define le64toh(x) OSSwapLittleToHostInt64(x)
+	
+	#define __BIG_ENDIAN    BIG_ENDIAN
+	#define __LITTLE_ENDIAN LITTLE_ENDIAN
+	#define __BYTE_ORDER    BYTE_ORDER
+#else
+	#include <endian.h>
+#endif
+>>>>>>> 32ba1e476520b94c51fcea11ce4b611ce1fc90aa
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
@@ -27,13 +56,17 @@
 
 namespace alchemist {
 
-namespace mpi = boost::mpi;
 namespace serialization = boost::serialization;
+namespace mpi = boost::mpi;
 using boost::format;
 
 typedef El::Matrix<double> Matrix;
 typedef El::AbstractDistMatrix<double> DistMatrix;
 typedef uint32_t WorkerId;
+
+
+void kmeansPP(uint32_t seed, std::vector<Eigen::MatrixXd> points, std::vector<double> weights, 
+    Eigen::MatrixXd & fitCenters, uint32_t maxIters);
 
 struct Worker;
 
@@ -134,16 +167,21 @@ struct TransposeCommand : Command {
 struct KMeansCommand : Command {
   MatrixHandle origMat;
   uint32_t numCenters;
-  uint32_t driverRank;
+  uint32_t initSteps; // relevant in k-means|| only
+  double changeThreshold; // stop when all centers change by Euclidean distance less than changeThreshold
+  uint32_t method;
+  uint64_t seed;
   MatrixHandle centersHandle;
   MatrixHandle assignmentsHandle;
 
   explicit KMeansCommand() {}
 
-  KMeansCommand(MatrixHandle origMat, uint32_t numCenters, uint32_t driverRank,
+  KMeansCommand(MatrixHandle origMat, uint32_t numCenters, uint32_t method,
+      uint32_t initSteps, double changeThreshold, uint64_t seed, 
       MatrixHandle centersHandle, MatrixHandle assignmentsHandle) :
-    origMat(origMat), numCenters(numCenters), driverRank(driverRank), 
-    centersHandle(centersHandle), assignmentsHandle(assignmentsHandle) {}
+    origMat(origMat), numCenters(numCenters), method(method),
+    initSteps(initSteps), changeThreshold(changeThreshold), 
+    seed(seed), centersHandle(centersHandle), assignmentsHandle(assignmentsHandle) {}
 
   virtual void run(Worker *self) const;
 
@@ -152,7 +190,10 @@ struct KMeansCommand : Command {
     ar & serialization::base_object<Command>(*this);
     ar & origMat;
     ar & numCenters;
-    ar & driverRank;
+    ar & initSteps;
+    ar & changeThreshold;
+    ar & method;
+    ar & seed,
     ar & centersHandle;
     ar & assignmentsHandle;
   }
@@ -281,6 +322,62 @@ int driverMain(const mpi::communicator &world);
 int workerMain(const mpi::communicator &world, const mpi::communicator &peers);
 
 } // namespace alchemist
+
+namespace fmt {
+  // for displaying Eigen expressions. Note, if you include spdlog/fmt/ostr.h, this will be 
+  // hidden by the ostream<< function for Eigen objects
+  template<typename ArgFormatter, typename Derived>
+  inline void format(BasicFormatter<char, ArgFormatter> &f,
+      const char *&format_str, const Eigen::MatrixBase<Derived> &exp) {
+    std::stringstream buf;
+    buf << "Eigen matrix " << std::endl << exp;
+    f.writer().write("{}", buf.str()); 
+  }
+
+  // for displaying vectors
+  template <typename T, typename A>
+  inline void format(BasicFormatter<char> &f, 
+      const char *&format_str, const std::vector<T,A> &vec) {
+    std::stringstream buf;
+    buf << "Vector of length " << vec.size() << std::endl << "{";
+    for(typename std::vector<T>::size_type pos=0; pos < vec.size()-1; ++pos) {
+      buf << vec[pos] << "," << std::endl;
+    }
+    buf << vec[vec.size()-1] << "}";
+    f.writer().write("{}", buf.str());
+  }
+
+  inline void format(BasicFormatter<char> &f,
+      const char *&format_str, const alchemist::MatrixHandle &handle) {
+    f.writer().write("[{}]", handle.id);
+  }
+}
+
+namespace boost { namespace serialization {
+  // to serialize Eigen Matrix objects
+	template< class Archive,
+						class S,
+						int Rows_,
+						int Cols_,
+						int Ops_,
+						int MaxRows_,
+						int MaxCols_>
+	inline void serialize(Archive & ar, 
+		Eigen::Matrix<S, Rows_, Cols_, Ops_, MaxRows_, MaxCols_> & matrix, 
+		const unsigned int version)
+	{
+		int rows = matrix.rows();
+		int cols = matrix.cols();
+		ar & make_nvp("rows", rows);
+		ar & make_nvp("cols", cols);    
+		matrix.resize(rows, cols); // no-op if size does not change!
+
+		// always save/load col-major
+		for(int c = 0; c < cols; ++c)
+			for(int r = 0; r < rows; ++r)
+				ar & make_nvp("val", matrix(r,c));
+	}
+}} // namespace boost::serialization
 
 BOOST_CLASS_EXPORT_KEY(alchemist::Command);
 BOOST_CLASS_EXPORT_KEY(alchemist::HaltCommand);

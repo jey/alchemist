@@ -5,8 +5,11 @@
 #include <map>
 #include <ext/stdio_filebuf.h>
 #include "arrssym.h"
+#include <random>
+#include "spdlog/spdlog.h"
 
 using Eigen::MatrixXd;
+using Eigen::VectorXd;
 
 namespace alchemist {
 
@@ -19,6 +22,7 @@ struct Driver {
   std::vector<WorkerInfo> workers;
   std::map<MatrixHandle, NewMatrixCommand> matrices; // need to account for other commands that generate (multiple) matrices 
   uint32_t nextMatrixId;
+  std::shared_ptr<spdlog::logger> log;
 
   Driver(const mpi::communicator &world, std::istream &is, std::ostream &os);
   void issue(const Command &cmd);
@@ -44,13 +48,23 @@ void Driver::issue(const Command &cmd) {
 }
 
 int Driver::main() {
+  //log to console as well as file (single-threaded logging)
+  //TODO: allow to specify log directory, log level, etc.
+  std::vector<spdlog::sink_ptr> sinks;
+  sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>());
+  sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>("driver.log"));
+  log = std::make_shared<spdlog::logger>("driver", std::begin(sinks), std::end(sinks));
+  log->flush_on(spdlog::level::warn); // flush whenever warning or more critical message is logged
+  log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
+  log->info("Started Driver");
+
   // get WorkerInfo
   auto numWorkers = world.size() - 1;
   workers.resize(numWorkers);
   for(auto id = 0; id < numWorkers; ++id) {
     world.recv(id + 1, 0, workers[id]);
   }
-  std::cerr << "AlDriver: workers ready" << std::endl;
+  log->info("{} workers ready", numWorkers);
 
   // handshake
   ENSURE(input.readInt() == 0xABCD);
@@ -67,8 +81,7 @@ int Driver::main() {
   bool shouldExit = false;
   while(!shouldExit) {
     uint32_t typeCode = input.readInt();
-    std::cerr << "AlDriver: received code " << std::hex << typeCode << std::endl;
-    std::cerr << std::flush;
+    log->info("Received code {#x}", typeCode);
 
     switch(typeCode) {
       // shutdown
@@ -116,10 +129,10 @@ int Driver::main() {
         break;
 
       default:
-        std::cerr << "Unknown typeCode: " << std::hex << typeCode << std::endl;
+        log->error("Unknown typeCode {#x}", typeCode);
         abort();
     }
-    std::cerr << "Waiting on next command" << std::endl;
+    log->info("Waiting on next command");
   }
 
   // wait for workers to reach exit
@@ -183,21 +196,32 @@ void Driver::handle_computeLowrankSVD() {
 
 // TODO: the cluster centers should be stored locally on driver and reduced/broadcasted. the current
 // way of updating kmeans centers is ridiculous
+// TODO: currently only implements kmeans||
 void Driver::handle_kmeansClustering() {
   uint32_t inputMat = input.readInt();
   uint32_t numCenters = input.readInt();
-  uint32_t maxnumIters = input.readInt();
-  uint32_t changeThreshold = input.readDouble(); // terminate if no more than changeThreshold percentage of the points change membership in an iteration
+  uint32_t maxnumIters = input.readInt(); // how many iteration of Lloyd's algorithm to use
+  uint32_t initSteps = input.readInt(); // number of initialization steps to use in kmeans||
+  double changeThreshold = input.readDouble(); // if all the centers change by Euclidean distance less than changeThreshold, then we stop the iterations
+  uint32_t method = input.readInt(); // which initialization method to use to choose initial cluster center guesses
+  uint64_t seed = input.readLong(); // randomness seed used in driver and workers
+
+  log->info("Starting K-means on matrix {}", MatrixHandle{inputMat});
+  log->info("numCenters = {}, maxnumIters = {}, initSteps = {}, changeThreshold = {}, method = {}, seed = {}",
+      numCenters, maxnumIters, initSteps, changeThreshold, method, seed);
+
   MatrixHandle centersHandle{nextMatrixId++};
   MatrixHandle assignmentsHandle{nextMatrixId++};
 
   if (changeThreshold < 0.0 || changeThreshold > 1.0) {
-      std::cerr << "unreasonable change threshold in k-means: " << changeThreshold << std::endl;
-      abort();
+    log->error("Unreasonable change threshold in k-means: {}", changeThreshold);
+    abort();
+  }
+  if (method != 1) {
+    log->warn("Sorry, only k-means|| initialization has been implemented, so ignoring your choice of method {}", method);
   }
 
-  KMeansCommand cmd(MatrixHandle{inputMat}, numCenters, 0,
-      centersHandle, assignmentsHandle);
+  KMeansCommand cmd(MatrixHandle{inputMat}, numCenters, method, initSteps, changeThreshold, seed, centersHandle, assignmentsHandle);
   std::vector<uint32_t> dummy_layout(1);
   auto n = matrices[MatrixHandle{inputMat}].numRows;
   auto d = matrices[MatrixHandle{inputMat}].numCols;
@@ -207,63 +231,99 @@ void Driver::handle_kmeansClustering() {
   ENSURE(matrices.insert(std::make_pair(assignmentsHandle, assignmentDummyCmd)).second);
 
   issue(cmd); // initial call initializes stuff and waits for next command
-  double percentMoved = 1.0;
+
+  /******** START of kmeans|| initialization ********/
+  std::mt19937 gen(seed);
+  std::uniform_int_distribution<unsigned long> dis(0, n-1);
+  uint32_t rowidx = dis(gen);
+  std::vector<double> initialCenter(d);
+
+  mpi::broadcast(world, rowidx, 0); // tell the workers which row to use as initialization in kmeans||
+  world.barrier(); // wait for workers to return oversampled cluster centers and sizes
+
+  std::vector<uint32_t> clusterSizes;
+  std::vector<MatrixXd> initClusterCenters;
+  world.recv(1, mpi::any_tag, clusterSizes);
+  world.recv(1, mpi::any_tag, initClusterCenters);
+  world.barrier();
+
+  log->info("Retrieved the k-means|| oversized set of potential cluster centers");
+  log->debug("{}", initClusterCenters);
+
+  // use kmeans++ locally to find the initial cluster centers
+  std::vector<double> weights;
+  weights.reserve(clusterSizes.size());
+  std::for_each(clusterSizes.begin(), clusterSizes.end(), [&weights](const uint32_t & cnt){ weights.push_back((double) cnt); });
+  MatrixXd clusterCenters(numCenters, d);
+
+  kmeansPP(gen(), initClusterCenters, weights, clusterCenters, 30); // same number of maxIters as spark kmeans
+
+  log->info("Ran local k-means on the driver to determine starting cluster centers");
+  log->debug("{}", clusterCenters);
+
+  mpi::broadcast(world, clusterCenters.data(), numCenters*d, 0);
+  /******** END of kMeans|| initialization ********/
+
+  /******** START of Lloyd's algorithm iterations ********/
+  double percentAssignmentsChanged = 1.0;
+  bool centersMovedQ = true;
   uint32_t numChanged = 0;
   uint32_t numIters = 0;
-  uint32_t totalIters = 0;
-  uint32_t restarts = 0;
-  std::vector<uint32_t> clusterSizes(numCenters);
+  std::vector<uint32_t> parClusterSizes(numCenters);
   std::vector<uint32_t> zerosVector(numCenters);
 
   for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++)
     zerosVector[clusterIdx] = 0;
 
   uint32_t command = 1; // do another iteration
-  while (percentMoved > changeThreshold && numIters++ < maxnumIters)  {
-    std::cerr << format("Starting iteration %d of Lloyd's algorithm, %f percentage changed in last iter \n"
-        "----------------------------------------------------------------------\n") % numIters % percentMoved;
+  while (centersMovedQ && numIters++ < maxnumIters)  {
+    log->info("Starting iteration {} of Lloyd's algorithm, {} percentage changed in last iter",
+        numIters, percentAssignmentsChanged*100);
     numChanged = 0;
     for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++)
-      clusterSizes[clusterIdx] = 0;
-    mpi::broadcast(world, command, 0);
+      parClusterSizes[clusterIdx] = 0;
     command = 1; // do a basic iteration
+    mpi::broadcast(world, command, 0);
     mpi::reduce(world, (uint32_t) 0, numChanged, std::plus<int>(), 0);
-    mpi::reduce(world, zerosVector.data(), numCenters, clusterSizes.data(), std::plus<uint32_t>(), 0);
-    percentMoved = ((double) numChanged)/n;
+    mpi::reduce(world, zerosVector.data(), numCenters, parClusterSizes.data(), std::plus<uint32_t>(), 0);
+    world.recv(1, mpi::any_tag, centersMovedQ);
+    percentAssignmentsChanged = ((double) numChanged)/n;
 
-    uint32_t minClusterSize = *std::min_element(std::begin(clusterSizes), std::end(clusterSizes));
-    if ( minClusterSize < 1) {
-      // this indicates there was an empty cluster, so restart the k-means process
-      restarts += 1;
-      percentMoved = 1.0;
-      totalIters += numIters;
-      numIters = 0;
-
-      std::cerr << format("Restarting Lloyd's algorithm (%d times / %d total iterates so far) because of an empty cluster\n") % restarts % totalIters;
-      command = 2; // reinitialize cluster centers
+    for(uint32_t clusterIdx = 0; clusterIdx < numCenters; clusterIdx++) {
+      if (parClusterSizes[clusterIdx] == 0) {
+        // this is an empty cluster, so randomly pick a point in the dataset
+        // as that cluster's centroid
+        centersMovedQ = true;
+        command = 2; // reinitialize this cluster center
+        uint32_t rowIdx = dis(gen);
+        mpi::broadcast(world, command, 0);
+        mpi::broadcast(world, clusterIdx, 0);
+        mpi::broadcast(world, rowIdx, 0);
+        world.barrier();
+      }
     }
+
   }
   command = 0xf; // terminate and finalize the k-means centers and assignments as distributed matrices
   mpi::broadcast(world, command, 0);
+  double objVal = 0.0;
+  mpi::reduce(world, 0.0, objVal, std::plus<double>(), 0);
   world.barrier();
 
-  std::cerr << format("Finished Lloyd's algorithm:\n"
-      "\t%d iterations in final run\n"
-      "\t%d total iterations over %d restarts\n"
-      "\t%f percent of points stable in the returned clustering\n") % numIters % totalIters % restarts % ((1-percentMoved)*100);
+  /******** END of Lloyd's iterations ********/
+
+  log->info("Finished Lloyd's algorithm: took {} iterations, final objective value {}", numIters, objVal);
   output.writeInt(0x1);
   output.writeInt(assignmentsHandle.id);
   output.writeInt(centersHandle.id);
   output.writeInt(numIters);
-  output.writeDouble(1-percentMoved);
-  output.writeInt(restarts);
-  output.writeInt(totalIters);
   output.flush();
 }
 
 void Driver::handle_getTranspose() {
   uint32_t inputMat = input.readInt();
   MatrixHandle transposeHandle{nextMatrixId++};
+  log->info("Constructing the transpose of matrix {}", MatrixHandle{inputMat});
 
   TransposeCommand cmd(MatrixHandle{inputMat}, transposeHandle);
   std::vector<uint32_t> dummy_layout(1);
@@ -277,7 +337,7 @@ void Driver::handle_getTranspose() {
   world.barrier(); // wait for command to finish
   output.writeInt(0x1);
   output.writeInt(transposeHandle.id);
-  std::cerr << "wrote handle" << std::endl;
+  log->info("Wrote handle for transpose"); 
   output.writeInt(0x1);
   output.flush();
 }
@@ -285,6 +345,7 @@ void Driver::handle_getTranspose() {
 // CAVEAT: Assumes tall-and-skinny for now, doesn't allow many options for controlling 
 // LIMITATIONS: assumes V small enough to fit on one machine (so can use ARPACK instead of PARPACK), but still distributes U,S,V and does distributed computations not needed
 void Driver::handle_truncatedSVD() {
+  log->info("Starting truncated SVD computation");
   uint32_t inputMat = input.readInt();
   uint32_t k = input.readInt();
 
@@ -304,8 +365,11 @@ void Driver::handle_truncatedSVD() {
   for(uint32_t idx = 0; idx < n; idx++)
     zerosVector[idx] = 0;
 
+  int iterNum = 0;
+
   while (!prob.ArnoldiBasisFound()) {
     prob.TakeStep();
+    ++iterNum;
     if (prob.GetIdo() == 1 || prob.GetIdo() == -1) {
       command = 1;
       mpi::broadcast(world, command, 0); 
@@ -313,10 +377,11 @@ void Driver::handle_truncatedSVD() {
       mpi::reduce(world, zerosVector.data(), n, prob.PutVector(), std::plus<double>(), 0);
     }
   }
+
   prob.FindEigenvectors();
-  
   uint32_t nconv = prob.ConvergedEigenvalues();
   uint32_t niters = prob.GetIter();
+  log->info("Done after {} Arnoldi iterations", niters);
 
   // assuming tall and skinny A for now
   MatrixXd rightVecs(n, nconv);
@@ -378,7 +443,7 @@ void Driver::handle_computeThinSVD() {
 
   // wait for command to finish
   world.barrier();
-  std::cerr << "Done with SVD computation" << std::endl;
+  log->info("Done with SVD computation");
   output.writeInt(0x1);
   output.flush();
 }

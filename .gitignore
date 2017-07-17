@@ -2,3 +2,7 @@ target/
 Elemental/
 bins/
 prep.sh
+*.log
+tmp/
+*.out
+data/mnist.t

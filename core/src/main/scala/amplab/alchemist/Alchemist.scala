@@ -179,12 +179,23 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return (UHandle, SHandle, VHandle)
   }
 
-  def kMeans(mat: MatrixHandle, k : Int, maxIters : Int, threshold: Double) : Tuple6[MatrixHandle, MatrixHandle, Int, Double, Int, Int] = {
+  def kMeans(mat: MatrixHandle, k : Int = 2, maxIters : Int = 20, 
+             epsilon: Double = 1e-4, initMode: String = "k-means||", initSteps: Int = 2, seed: Long = 0) : Tuple3[MatrixHandle, MatrixHandle, Int] = {
+    val method : Int = initMode match {
+      case s if s matches "(?i)random" => 0
+      case s if s matches "(?i)k-means||" => 1
+      case _ => 1
+    }
+    val trueSeed = if (seed == 0) { System.currentTimeMillis() } else seed
+
     output.writeInt(0x7)
     output.writeInt(mat.id)
     output.writeInt(k)
     output.writeInt(maxIters)
-    output.writeDouble(threshold)
+    output.writeInt(initSteps)
+    output.writeDouble(epsilon)
+    output.writeInt(method)
+    output.writeLong(trueSeed)
     output.flush()
 
     if (input.readInt() != 0x1) {
@@ -193,11 +204,8 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     val assignmentsHandle = new MatrixHandle(input.readInt())
     val centersHandle = new MatrixHandle(input.readInt())
     val numIters = input.readInt()
-    val percentageStable = input.readDouble()
-    val restarts = input.readInt()
-    val totalIters = input.readInt()
 
-    return (centersHandle, assignmentsHandle, numIters, percentageStable, restarts, totalIters)
+    return (centersHandle, assignmentsHandle, numIters)
   }
 
   def matrixSVDStart(mat: MatrixHandle) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
@@ -354,9 +362,9 @@ class Alchemist(val mysc: SparkContext) {
     (Umat, Smat, Vmat)
   }
 
-  def kMeans(mat: AlMatrix, k: Int, maxIters: Int, threshold: Double) : Tuple6[AlMatrix, AlMatrix, Int, Double, Int, Int] = {
-    val (handleCenters, handleAssignments, numIters, stablePercentage, restarts, totalIters) = client.kMeans(mat.handle, k, maxIters, threshold)
-    (new AlMatrix(this, handleCenters), new AlMatrix(this, handleAssignments), numIters, stablePercentage, restarts, totalIters)
+  def kMeans(mat: AlMatrix, k: Int, maxIters: Int, threshold: Double) : Tuple3[AlMatrix, AlMatrix, Int] = {
+    val (handleCenters, handleAssignments, numIters) = client.kMeans(mat.handle, k, maxIters)
+    (new AlMatrix(this, handleCenters), new AlMatrix(this, handleAssignments), numIters)
   }
 
   def truncatedSVD(mat: AlMatrix, k: Int) : Tuple3[AlMatrix, AlMatrix, AlMatrix] = {

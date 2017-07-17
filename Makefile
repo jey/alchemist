@@ -10,10 +10,11 @@ build:
 
 .PHONY:
 check:
-	spark-submit test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar
+	spark-submit --driver-memory 2g test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar
 	@echo test complete
 
 .PHONY: clean
 clean:
 	$(MAKE) -C core clean
 	sbt -batch clean
+	rm *.log

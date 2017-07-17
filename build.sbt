@@ -19,10 +19,14 @@ lazy val core = (project in file("core")).
 lazy val tests = (project in file("test")).
   settings(commonSettings: _*).
   settings(
-    name := "alchemist-tests",
-    mainClass in assembly := Some("amplab.alchemist.BasicSuite")
+//    name := "alchemist-tests",
+//    mainClass in assembly := Some("amplab.alchemist.BasicSuite")
+//    name := "test-kmeans",
+//    mainClass in assembly := Some("amplab.alchemist.TestKmeans")
+    name := "test-svd",
+    mainClass in assembly := Some("amplab.alchemist.TestSvd")
   ).
   dependsOn(core)
-
+    
 //libraryDependencies += "org.scalatest" %% "scalatest" % "3.0.0" % "test"
 

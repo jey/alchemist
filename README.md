@@ -1,16 +1,19 @@
 Alchemist is a framework for easily and efficiently calling MPI-based codes from Apache Spark.
 
+![Platonic Alchemist Architecture](https://github.com/alexgittens/alchemist/blob/master/architecture.png)
+
 Supporting libraries that Alchemist uses:
-Elemental  --- used for distributing the matrices b/w Alchemist processes, distributed linear algebra
-Eigen3 -- used for local matrix manipulations (more convenient interface than Elemental)
-Arpack-ng -- for the computation of truncated SVDs
-Arpackpp -- very convenient C++ interface to Arpack-ng
+* Elemental -- used for distributing the matrices b/w Alchemist processes, distributed linear algebra
+* Eigen3 -- used for local matrix manipulations (more convenient interface than Elemental)
+* Arpack-ng -- for the computation of truncated SVDs
+* Arpackpp -- very convenient C++ interface to Arpack-ng
 
 # To run Alchemist in a fresh terminal:
 ```
-cd $HOME/Documents/alchemist # or whereever you installed it
+cd $HOME/Documents/alchemist # or wherever you installed it
 export ALPREFIX=$HOME/Documents/alchemist/bins # or whatever you used during install
-export PATH=$PATH:$HOME/local/spark-2.1.1/bin # or whereever spark-bin is located
+export PATH=$PATH:$HOME/local/spark-2.1.1/bin # or wherever spark-bin is located
+export TMPDIR=/tmp # avoid a Mac specific issue with tmpdir length
 make # will both build and run the test suite
 ```
 
@@ -20,6 +23,7 @@ make # will both build and run the test suite
 Assuming that the XCode command line tools, Homebrew, and Spark have been installed:
 ```
 brew install gcc
+brew install make --with-default-names
 brew install cmake
 brew install boost-mpi
 brew install sbt
@@ -40,7 +44,7 @@ cd Elemental
 git checkout 0.87
 mkdir build
 cd build
-CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+CC=gcc-7 CXX=g++-7 FC=gfortran-7 cmake -DCMAKE_BUILD_TYPE=Release -DEL_IGNORE_OSX_GCC_ALIGNMENT_PROBLEM=ON -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
 nice make -j8
 make install
 cd ../..
@@ -59,6 +63,18 @@ cmake -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
 make install
 cd ../..
 rm -rf eigen-eigen-5a0156e40feb
+```
+
+## Install SPDLog into ALPREFIX
+```
+git clone https://github.com/gabime/spdlog.git
+cd spdlog
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+make install
+cd ../..
+rm -rf spdlog
 ```
 
 ## Install Arpack-ng into ALPREFIX 
@@ -86,4 +102,6 @@ cd ../..
 rm -rf arpackpp
 ```
 
+# To test
+Needs to be made less manual and more in line with standard practices, e.g., see the spark-perf project
 
