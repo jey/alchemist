@@ -554,11 +554,11 @@ struct WorkerClientSendHandler {
           ENSURE(inpos <= inbuf.size());
           if(inpos >= 4) {
             char *dataPtr = &inbuf[0];
-            uint32_t typeCode = be64toh(*(uint32_t*)dataPtr);
+            uint32_t typeCode = be32toh(*(uint32_t*)dataPtr);
             dataPtr += 4;
             if(typeCode == 0x3 && inpos == inbuf.size()) {
               // sendRow
-              ENSURE(be64toh(*(uint32_t*)dataPtr) == handle.id);
+              ENSURE(be32toh(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
@@ -677,12 +677,12 @@ struct WorkerClientReceiveHandler {
           ENSURE(pos <= inbuf.size());
           if(pos >= 4) {
             char *dataPtr = &inbuf[0];
-            uint32_t typeCode = be64toh(*(uint32_t*)dataPtr);
+            uint32_t typeCode = be32toh(*(uint32_t*)dataPtr);
             dataPtr += 4;
             if(typeCode == 0x1 && pos == inbuf.size()) {
               // addRow
               size_t numCols = matrix->Width();
-              ENSURE(be64toh(*(uint32_t*)dataPtr) == handle.id);
+              ENSURE(be32toh(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
