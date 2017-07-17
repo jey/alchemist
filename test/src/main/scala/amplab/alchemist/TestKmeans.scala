@@ -204,7 +204,7 @@ object TestKmeans {
         //// K-Means Clustering by Alchemist
         t1 = System.nanoTime()
         val threshold: Double = 1e-4
-        val (alCenters, alAssignments, numIters, percentageStable, restarts, totalIters) = al.kMeans(alMatkMeans, k, maxiter, threshold)
+        val (alCenters, alAssignments, numIters) = al.kMeans(alMatkMeans, k, maxiter, threshold)
         t2 = System.nanoTime()
         // Print Info
         println("Time cost of Alchemist k-means clustering: ")

@@ -102,4 +102,6 @@ cd ../..
 rm -rf arpackpp
 ```
 
+# To test
+Needs to be made less manual and more in line with standard practices, e.g., see the spark-perf project
 
