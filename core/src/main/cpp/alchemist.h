@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <eigen3/Eigen/Dense>
+#include "spdlog/fmt/fmt.h"
 #include "endian.h"
 #include "spdlog/fmt/fmt.h"
 
