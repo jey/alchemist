@@ -474,7 +474,8 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 }
 
 void NewMatrixCommand::run(Worker *self) const {
-  DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(numRows, numCols, self->grid);
+  auto handle = info.handle;
+  DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(info.numRows, info.numCols, self->grid);
   Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   self->receiveMatrixBlocks(handle, layout);

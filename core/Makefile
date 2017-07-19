@@ -1,25 +1,20 @@
-ifdef ALPREFIX
-  EL_PATH ?= $(ALPREFIX)
-  EIGEN_PATH ?= $(ALPREFIX)/include
-  ARPACKPP_PATH ?= $(ALPREFIX)/include/arpackpp
-endif
-EL_PATH ?= $(CURDIR)/../../bins
-EIGEN_PATH ?= $(CURDIR)/../../bins/include
-ARPACKPP_PATH ?= $(CURDIR)/../../bins/include/arpackpp
+ALPREFIX ?= $(CURDIR)/../../bins
+EL_PATH ?= $(ALPREFIX)
 include $(EL_PATH)/conf/ElVars
 
 SRC_PATH = src/main
 TARGET_PATH = target
 
-CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH) -std=c++14 -O3 
+# put libEl's CXXFLAGS in front so ours can override it
+CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
+#CXXFLAGS += -Wall
+CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -O1
+CXXFLAGS += "-I$(ALPREFIX)/include"
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
-LDFLAGS += -lboost_serialization -lboost_mpi -lmpi
-LDFLAGS += -larpack
+LDFLAGS += -lboost_serialization -lboost_mpi -lmpi -larpack
+LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 
-ifdef ALPREFIX
-  LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
-endif
-
+# some environments (e.g. Cori) require this to find boost
 ifdef BOOST_DIR
   CXXFLAGS += "-I$(BOOST_DIR)/include"
   LDFLAGS += "-L$(BOOST_DIR)/lib" "-Wl,-rpath,$(BOOST_DIR)/lib"

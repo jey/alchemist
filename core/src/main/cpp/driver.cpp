@@ -4,8 +4,8 @@
 #include <fstream>
 #include <map>
 #include <ext/stdio_filebuf.h>
-#include "arrssym.h"
 #include <random>
+#include "arpackpp/arrssym.h"
 #include "spdlog/spdlog.h"
 
 using Eigen::MatrixXd;
@@ -20,12 +20,13 @@ struct Driver {
   DataInputStream input;
   DataOutputStream output;
   std::vector<WorkerInfo> workers;
-  std::map<MatrixHandle, NewMatrixCommand> matrices; // need to account for other commands that generate (multiple) matrices 
+  std::map<MatrixHandle, MatrixDescriptor> matrices;
   uint32_t nextMatrixId;
   std::shared_ptr<spdlog::logger> log;
 
   Driver(const mpi::communicator &world, std::istream &is, std::ostream &os);
   void issue(const Command &cmd);
+  MatrixHandle registerMatrix(size_t numRows, size_t numCols);
   int main();
 
   void handle_newMatrix();
@@ -45,6 +46,13 @@ Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &o
 void Driver::issue(const Command &cmd) {
   const Command *cmdptr = &cmd;
   mpi::broadcast(world, cmdptr, 0);
+}
+
+MatrixHandle Driver::registerMatrix(size_t numRows, size_t numCols) {
+  MatrixHandle handle{nextMatrixId++};
+  MatrixDescriptor info(handle, numRows, numCols);
+  matrices.insert(std::make_pair(handle, info));
+  return handle;
 }
 
 int Driver::main() {
@@ -198,7 +206,7 @@ void Driver::handle_computeLowrankSVD() {
 // way of updating kmeans centers is ridiculous
 // TODO: currently only implements kmeans||
 void Driver::handle_kmeansClustering() {
-  uint32_t inputMat = input.readInt();
+  MatrixHandle inputMat{input.readInt()};
   uint32_t numCenters = input.readInt();
   uint32_t maxnumIters = input.readInt(); // how many iteration of Lloyd's algorithm to use
   uint32_t initSteps = input.readInt(); // number of initialization steps to use in kmeans||
@@ -206,12 +214,9 @@ void Driver::handle_kmeansClustering() {
   uint32_t method = input.readInt(); // which initialization method to use to choose initial cluster center guesses
   uint64_t seed = input.readLong(); // randomness seed used in driver and workers
 
-  log->info("Starting K-means on matrix {}", MatrixHandle{inputMat});
+  log->info("Starting K-means on matrix {}", inputMat);
   log->info("numCenters = {}, maxnumIters = {}, initSteps = {}, changeThreshold = {}, method = {}, seed = {}",
       numCenters, maxnumIters, initSteps, changeThreshold, method, seed);
-
-  MatrixHandle centersHandle{nextMatrixId++};
-  MatrixHandle assignmentsHandle{nextMatrixId++};
 
   if (changeThreshold < 0.0 || changeThreshold > 1.0) {
     log->error("Unreasonable change threshold in k-means: {}", changeThreshold);
@@ -221,15 +226,11 @@ void Driver::handle_kmeansClustering() {
     log->warn("Sorry, only k-means|| initialization has been implemented, so ignoring your choice of method {}", method);
   }
 
-  KMeansCommand cmd(MatrixHandle{inputMat}, numCenters, method, initSteps, changeThreshold, seed, centersHandle, assignmentsHandle);
-  std::vector<uint32_t> dummy_layout(1);
-  auto n = matrices[MatrixHandle{inputMat}].numRows;
-  auto d = matrices[MatrixHandle{inputMat}].numCols;
-  NewMatrixCommand centersDummyCmd(centersHandle, numCenters, d, dummy_layout);
-  NewMatrixCommand assignmentDummyCmd(assignmentsHandle, n, 1, dummy_layout);
-  ENSURE(matrices.insert(std::make_pair(centersHandle, centersDummyCmd)).second);
-  ENSURE(matrices.insert(std::make_pair(assignmentsHandle, assignmentDummyCmd)).second);
-
+  auto n = matrices[inputMat].numRows;
+  auto d = matrices[inputMat].numCols;
+  MatrixHandle centersHandle = this->registerMatrix(numCenters, d);
+  MatrixHandle assignmentsHandle = this->registerMatrix(n, 1);
+  KMeansCommand cmd(inputMat, numCenters, method, initSteps, changeThreshold, seed, centersHandle, assignmentsHandle);
   issue(cmd); // initial call initializes stuff and waits for next command
 
   /******** START of kmeans|| initialization ********/
@@ -321,17 +322,13 @@ void Driver::handle_kmeansClustering() {
 }
 
 void Driver::handle_getTranspose() {
-  uint32_t inputMat = input.readInt();
-  MatrixHandle transposeHandle{nextMatrixId++};
-  log->info("Constructing the transpose of matrix {}", MatrixHandle{inputMat});
+  MatrixHandle inputMat{input.readInt()};
+  log->info("Constructing the transpose of matrix {}", inputMat);
 
-  TransposeCommand cmd(MatrixHandle{inputMat}, transposeHandle);
-  std::vector<uint32_t> dummy_layout(1);
-  auto m = matrices[MatrixHandle{inputMat}].numRows;
-  auto n = matrices[MatrixHandle{inputMat}].numCols;
-  NewMatrixCommand dummycmd(transposeHandle, n, m, dummy_layout);
-  ENSURE(matrices.insert(std::make_pair(transposeHandle, dummycmd)).second);
-
+  auto numRows = matrices[inputMat].numCols;
+  auto numCols = matrices[inputMat].numRows;
+  MatrixHandle transposeHandle = registerMatrix(numRows, numCols);
+  TransposeCommand cmd(inputMat, transposeHandle);
   issue(cmd);
   
   world.barrier(); // wait for command to finish
@@ -346,17 +343,16 @@ void Driver::handle_getTranspose() {
 // LIMITATIONS: assumes V small enough to fit on one machine (so can use ARPACK instead of PARPACK), but still distributes U,S,V and does distributed computations not needed
 void Driver::handle_truncatedSVD() {
   log->info("Starting truncated SVD computation");
-  uint32_t inputMat = input.readInt();
+  MatrixHandle inputMat{input.readInt()};
   uint32_t k = input.readInt();
 
   MatrixHandle UHandle{nextMatrixId++};
   MatrixHandle SHandle{nextMatrixId++};
   MatrixHandle VHandle{nextMatrixId++};
 
-  auto m = matrices[MatrixHandle{inputMat}].numRows;
-  auto n = matrices[MatrixHandle{inputMat}].numCols;
-  TruncatedSVDCommand cmd(MatrixHandle{inputMat}, UHandle, SHandle, VHandle, k);
-
+  auto m = matrices[inputMat].numRows;
+  auto n = matrices[inputMat].numCols;
+  TruncatedSVDCommand cmd(inputMat, UHandle, SHandle, VHandle, k);
   issue(cmd);
 
   ARrcSymStdEig<double> prob(n, k, "LM");
@@ -396,13 +392,12 @@ void Driver::handle_truncatedSVD() {
   mpi::broadcast(world, rightVecs.data(), n*nconv, 0);
   mpi::broadcast(world, prob.RawEigenvalues(), nconv, 0);
   
-  std::vector<uint32_t> dummy_layout(1);
-  NewMatrixCommand dummyUcmd(UHandle, m, nconv, dummy_layout);
-  NewMatrixCommand dummyScmd(SHandle, nconv, 1, dummy_layout);
-  NewMatrixCommand dummyVcmd(VHandle, n, nconv, dummy_layout);
-  ENSURE(matrices.insert(std::make_pair(UHandle, dummyUcmd)).second);
-  ENSURE(matrices.insert(std::make_pair(SHandle, dummyScmd)).second);
-  ENSURE(matrices.insert(std::make_pair(VHandle, dummyVcmd)).second);
+  MatrixDescriptor Uinfo(UHandle, m, nconv);
+  MatrixDescriptor Sinfo(SHandle, nconv, 1);
+  MatrixDescriptor Vinfo(VHandle, n, nconv);
+  ENSURE(matrices.insert(std::make_pair(UHandle, Uinfo)).second);
+  ENSURE(matrices.insert(std::make_pair(SHandle, Sinfo)).second);
+  ENSURE(matrices.insert(std::make_pair(VHandle, Vinfo)).second);
 
   world.barrier();
   output.writeInt(0x1);
@@ -413,26 +408,17 @@ void Driver::handle_truncatedSVD() {
 }
 
 void Driver::handle_computeThinSVD() {
-  uint32_t inputMat = input.readInt();
+  MatrixHandle inputMat{input.readInt()};
 
-  MatrixHandle Uhandle{nextMatrixId++};
-  MatrixHandle Shandle{nextMatrixId++};
-  MatrixHandle Vhandle{nextMatrixId++};
-
-  ThinSVDCommand cmd(MatrixHandle{inputMat}, Uhandle, Shandle, Vhandle);
   // this needs to be done automatically rather than hand-coded. e.g. what if
   // we switch to determining rank by sing-val thresholding instead of doing thin SVD?
-  std::vector<uint32_t> dummy_layout(1);
-  auto m = matrices[MatrixHandle{inputMat}].numRows;
-  auto n = matrices[MatrixHandle{inputMat}].numCols;
+  auto m = matrices[inputMat].numRows;
+  auto n = matrices[inputMat].numCols;
   auto k = std::min(m,n);
-  NewMatrixCommand dummycmdU(Uhandle, m, k, dummy_layout);
-  NewMatrixCommand dummycmdS(Shandle, k, 1, dummy_layout);
-  NewMatrixCommand dummycmdV(Uhandle, n, k, dummy_layout);
-  ENSURE(matrices.insert(std::make_pair(Uhandle, dummycmdU)).second);
-  ENSURE(matrices.insert(std::make_pair(Shandle, dummycmdS)).second);
-  ENSURE(matrices.insert(std::make_pair(Vhandle, dummycmdV)).second);
-
+  MatrixHandle Uhandle = registerMatrix(m, k);
+  MatrixHandle Shandle = registerMatrix(k, 1);
+  MatrixHandle Vhandle = registerMatrix(n, k);
+  ThinSVDCommand cmd(inputMat, Uhandle, Shandle, Vhandle);
   issue(cmd);
 
   output.writeInt(0x1); // statusCode
@@ -449,19 +435,12 @@ void Driver::handle_computeThinSVD() {
 }
 
 void Driver::handle_matrixMul() {
-  uint32_t handleA = input.readInt();
-  uint32_t handleB = input.readInt();
-
-  MatrixHandle destHandle{nextMatrixId++};
-  MatrixMulCommand cmd(destHandle, MatrixHandle{handleA}, MatrixHandle{handleB});
-
-  // add a dummy newmatrixcommand to track this matrix
-  std::vector<uint32_t> dummy_layout(1);
-  auto numRows = matrices[MatrixHandle{handleA}].numRows;
-  auto numCols = matrices[MatrixHandle{handleB}].numCols;
-  NewMatrixCommand dummycmd(destHandle, numRows, numCols, dummy_layout);
-  ENSURE(matrices.insert(std::make_pair(destHandle, dummycmd)).second);
-
+  MatrixHandle matA{input.readInt()};
+  MatrixHandle matB{input.readInt()};
+  auto numRows = matrices[matA].numRows;
+  auto numCols = matrices[matB].numCols;
+  MatrixHandle destHandle = registerMatrix(numRows, numCols);
+  MatrixMulCommand cmd(destHandle, matA, matB);
   issue(cmd);
 
   // tell spark id of resulting matrix
@@ -476,12 +455,11 @@ void Driver::handle_matrixMul() {
 }
 
 void Driver::handle_matrixDims() {
-  uint32_t matrixHandle = input.readInt();
-  auto matrixCmd = matrices[MatrixHandle{matrixHandle}];
-
+  MatrixHandle matrixHandle{input.readInt()};
+  auto info = matrices[matrixHandle];
   output.writeInt(0x1);
-  output.writeLong(matrixCmd.numRows);
-  output.writeLong(matrixCmd.numCols);
+  output.writeLong(info.numRows);
+  output.writeLong(info.numCols);
   output.flush();
 
 }
@@ -525,9 +503,8 @@ void Driver::handle_newMatrix() {
   }
 
   // assign id and notify workers
-  MatrixHandle handle{nextMatrixId++};
-  NewMatrixCommand cmd(handle, numRows, numCols, layout);
-  ENSURE(matrices.insert(std::make_pair(handle, cmd)).second);
+  MatrixHandle handle = registerMatrix(numRows, numCols);
+  NewMatrixCommand cmd(matrices[handle], layout);
   issue(cmd);
 
   // tell spark to start loading
