@@ -305,7 +305,7 @@ struct NewMatrixCommand : Command {
   }
 };
 
-int driverMain(const mpi::communicator &world);
+int driverMain(const mpi::communicator &world, int argc, char *argv[]);
 int workerMain(const mpi::communicator &world, const mpi::communicator &peers);
 
 } // namespace alchemist

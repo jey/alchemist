@@ -327,6 +327,8 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
 }
 
 class Driver {
+  val listenSock = new java.net.ServerSocket(0);
+
   val driverProc: Process = {
     val pb = {
       if(System.getenv("NERSC_HOST") != null) {
@@ -334,13 +336,16 @@ class Driver {
         val hostfilePath = s"${System.getenv("SPARK_WORKER_DIR")}/slaves.alchemist"
         new ProcessBuilder("srun", "-O", "-I30", "-N", "2", "-w", hostfilePath, "core/target/alchemist")
       } else {
-        new ProcessBuilder("mpirun", "-q", "-np", "4", "core/target/alchemist")
+        new ProcessBuilder("mpirun", "-q", "-np", "4", "core/target/alchemist",
+          "localhost", listenSock.getLocalPort().toString())
       }
     }
     pb.redirectError(ProcessBuilder.Redirect.INHERIT).start
   }
 
-  val client = new DriverClient(driverProc.getInputStream, driverProc.getOutputStream)
+  val driverSock = listenSock.accept()
+
+  val client = new DriverClient(driverSock.getInputStream, driverSock.getOutputStream)
 
   def stop(): Unit = {
     client.shutdown

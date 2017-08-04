@@ -11,7 +11,7 @@ CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
 CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -O1
 CXXFLAGS += "-I$(ALPREFIX)/include"
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
-LDFLAGS += -lboost_serialization -lboost_mpi -lmpi -larpack
+LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -lmpi -larpack
 LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 
 # some environments (e.g. Cori) require this to find boost

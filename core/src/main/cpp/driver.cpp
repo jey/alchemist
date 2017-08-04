@@ -3,8 +3,9 @@
 #include <iostream>
 #include <fstream>
 #include <map>
-#include <ext/stdio_filebuf.h>
 #include <random>
+#include <sstream>
+#include <boost/asio.hpp>
 #include "arpackpp/arrssym.h"
 #include "spdlog/spdlog.h"
 
@@ -518,14 +519,13 @@ void Driver::handle_newMatrix() {
   output.flush();
 }
 
-int driverMain(const mpi::communicator &world) {
-  int outfd = ::dup(1);
-  ENSURE(::dup2(2, 1) == 1);
-  __gnu_cxx::stdio_filebuf<char> outbuf(outfd, std::ios::out);
-  std::ostream output(&outbuf);
-  auto result = Driver(world, std::cin, output).main();
-  output.flush();
-  ::close(outfd);
+int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
+  using boost::asio::ip::tcp;
+  ENSURE(argc == 3);
+  boost::asio::ip::tcp::iostream stream(argv[1], argv[2]);
+  ENSURE(stream);
+  stream.rdbuf()->non_blocking(false);
+  auto result = Driver(world, stream, stream).main();
   return result;
 }
 
