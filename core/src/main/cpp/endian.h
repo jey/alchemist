@@ -20,13 +20,14 @@
   #define be64toh(x) OSSwapBigToHostInt64(x)
   #define le64toh(x) OSSwapLittleToHostInt64(x)
 
-#elif defined(__LINUX__)
+#elif defined(__LINUX__) 
 
   #include <endian.h>
 
 #else
 
-  #error "unsupported platform"
+  #warning "unsupported platform"
+  #include <endian.h>
 
 #endif
 

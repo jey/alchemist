@@ -8,6 +8,9 @@ Supporting libraries that Alchemist uses:
 * Arpack-ng -- for the computation of truncated SVDs
 * Arpackpp -- very convenient C++ interface to Arpack-ng
 
+The remainder of this file gives instructions for installing and running
+Alchemist locally on a Powerbook. See also [instructions for installing and running Alchemist on Cori](CORI_README.md), a NERSC supercomputer.
+
 # To run Alchemist in a fresh terminal:
 ```
 cd $HOME/Documents/alchemist # or wherever you installed it

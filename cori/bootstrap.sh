@@ -20,11 +20,13 @@ WITH_EL=1
 WITH_ARPACK=1
 WITH_ARPACKPP=1
 WITH_EIGEN=1
+WITH_SPDLOG=1
 
 # Check that the cmake toolchain file is where we expect
 [ -f $ALROOT/alchemist/cori/Cori-gnu.cmake ]
 
 # Setup
+module unload PrgEnv-intel
 module load PrgEnv-gnu
 module load gcc
 module load java
@@ -119,6 +121,26 @@ fi
 if [ "$WITH_EIGEN" = 1 ]; then
   curl -L http://bitbucket.org/eigen/eigen/get/3.3.4.tar.bz2 | tar xvfj -
   cd eigen-eigen-5a0156e40feb
+  mkdir build
+  cd build
+  cmake \
+    -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
+    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/cori/Cori-gnu.cmake" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_FLAGS="-dynamic" \
+    -DCMAKE_CXX_FLAGS="-dynamic" \
+    -DCMAKE_Fortran_FLAGS="-dynamic" \
+    ..
+  nice make -j16
+  make install
+  cd ../..
+fi
+
+# SPDLog
+if [ "$WITH_SPDLOG" = 1 ]; then
+  git clone https://github.com/gabime/spdlog.git
+  cd spdlog
+  git checkout 4fba14c79f356ae48d6141c561bf9fd7ba33fabd
   mkdir build
   cd build
   cmake \

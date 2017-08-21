@@ -13,8 +13,12 @@ TARGET_PATH = target
 
 CXXFLAGS += $(EL_COMPILE_FLAGS) -Wall -Wno-unused -I $(EIGEN_PATH) -I $(ARPACKPP_PATH) -std=c++14 -O3 
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
-LDFLAGS += -lboost_serialization -lboost_mpi -lmpi
+LDFLAGS += -lboost_serialization -lboost_mpi 
 LDFLAGS += -larpack
+
+ifeq ($(shell uname), "Darwin")
+  LDFLAGS += -lmpi
+endif
 
 ifdef ALPREFIX
   LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
