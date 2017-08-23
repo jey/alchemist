@@ -474,7 +474,8 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 }
 
 void NewMatrixCommand::run(Worker *self) const {
-  DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(numRows, numCols, self->grid);
+  auto handle = info.handle;
+  DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(info.numRows, info.numCols, self->grid);
   Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   self->receiveMatrixBlocks(handle, layout);
@@ -554,11 +555,11 @@ struct WorkerClientSendHandler {
           ENSURE(inpos <= inbuf.size());
           if(inpos >= 4) {
             char *dataPtr = &inbuf[0];
-            uint32_t typeCode = be64toh(*(uint32_t*)dataPtr);
+            uint32_t typeCode = be32toh(*(uint32_t*)dataPtr);
             dataPtr += 4;
             if(typeCode == 0x3 && inpos == inbuf.size()) {
               // sendRow
-              ENSURE(be64toh(*(uint32_t*)dataPtr) == handle.id);
+              ENSURE(be32toh(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
@@ -677,12 +678,12 @@ struct WorkerClientReceiveHandler {
           ENSURE(pos <= inbuf.size());
           if(pos >= 4) {
             char *dataPtr = &inbuf[0];
-            uint32_t typeCode = be64toh(*(uint32_t*)dataPtr);
+            uint32_t typeCode = be32toh(*(uint32_t*)dataPtr);
             dataPtr += 4;
             if(typeCode == 0x1 && pos == inbuf.size()) {
               // addRow
               size_t numCols = matrix->Width();
-              ENSURE(be64toh(*(uint32_t*)dataPtr) == handle.id);
+              ENSURE(be32toh(*(uint32_t*)dataPtr) == handle.id);
               dataPtr += 4;
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
@@ -840,7 +841,6 @@ int Worker::main() {
 }
 
 int workerMain(const mpi::communicator &world, const mpi::communicator &peers) {
-  ENSURE(::dup2(2, 1) == 1); // replaces stdout w/ stderr?
   return Worker(world, peers).main();
 }
 

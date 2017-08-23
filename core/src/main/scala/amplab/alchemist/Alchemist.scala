@@ -11,7 +11,10 @@ import java.io.{
 import java.nio.{
     DoubleBuffer, ByteBuffer
 }
+import scala.io.Source
+import java.nio.file.{Paths, Files}
 import java.nio.charset.StandardCharsets
+import scala.compat.Platform.EOL
 
 class DataInputStream(istream: InputStream) extends JDataInputStream(istream) {
   def readArrayLength(): Int = {
@@ -28,8 +31,8 @@ class DataInputStream(istream: InputStream) extends JDataInputStream(istream) {
 
   def readDoubleArray(): Array[Double] = {
     val bufLen = readArrayLength()
-    assert(bufLen % 8 == 0);
-    val buf = new Array[Double](bufLen / 8);
+    assert(bufLen % 8 == 0)
+    val buf = new Array[Double](bufLen / 8)
     for(i <- 0 until bufLen / 8) {
       buf(i) = readDouble()
     }
@@ -59,37 +62,63 @@ class MatrixHandle(val id: Int) extends Serializable {
 
 class WorkerClient(val hostname: String, val port: Int) {
   val sock = java.nio.channels.SocketChannel.open(new java.net.InetSocketAddress(hostname, port))
+  var outbuf: ByteBuffer = null
+  var inbuf: ByteBuffer = null
 
   private def sendMessage(outbuf: ByteBuffer): Unit = {
+    assert(!outbuf.hasRemaining())
     outbuf.rewind()
     while(sock.write(outbuf) != 0) {
     }
+    outbuf.clear()
+    assert(outbuf.position() == 0)
+  }
+
+  private def beginOutput(length: Int): ByteBuffer = {
+    if(outbuf == null) {
+      outbuf = ByteBuffer.allocate(Math.max(length, 16 * 1024 * 1024))
+    }
+    assert(outbuf.position() == 0)
+    if(outbuf.capacity() < length) {
+      outbuf = ByteBuffer.allocate(length)
+    }
+    outbuf.limit(length)
+    return outbuf
+  }
+
+  private def beginInput(length: Int): ByteBuffer = {
+    if(inbuf == null || inbuf.capacity() < length) {
+      inbuf = ByteBuffer.allocate(Math.max(length, 16 * 1024 * 1024))
+    }
+    inbuf.clear().limit(length)
+    return inbuf
   }
 
   def newMatrix_addRow(handle: MatrixHandle, rowIdx: Long, vals: Array[Double]) = {
-    val outbuf = ByteBuffer.allocate(4 + 4 + 8 + 8 + 8 * vals.length)
+    val outbuf = beginOutput(4 + 4 + 8 + 8 + 8 * vals.length)
     outbuf.putInt(0x1)  // typeCode = addRow
     outbuf.putInt(handle.id)
     outbuf.putLong(rowIdx)
     outbuf.putLong(vals.length * 8)
     outbuf.asDoubleBuffer().put(vals)
+    outbuf.position(outbuf.position() + 8 * vals.length)
     sendMessage(outbuf)
   }
 
   def newMatrix_partitionComplete(handle: MatrixHandle) = {
-    val outbuf = ByteBuffer.allocate(4)
+    val outbuf = beginOutput(4)
     outbuf.putInt(0x2)  // typeCode = partitionComplete
     sendMessage(outbuf)
   }
 
   def getIndexedRowMatrix_getRow(handle: MatrixHandle, rowIndex: Long, numCols: Int) : DenseVector = {
-    val outbuf = ByteBuffer.allocate(4 + 4 + 8)
+    val outbuf = beginOutput(4 + 4 + 8)
     outbuf.putInt(0x3) // typeCode = getRow
     outbuf.putInt(handle.id)
     outbuf.putLong(rowIndex)
     sendMessage(outbuf)
 
-    val inbuf = ByteBuffer.allocate(8 + 8 * numCols)
+    val inbuf = beginInput(8 + 8 * numCols)
     while(inbuf.hasRemaining()) {
       sock.read(inbuf)
     }
@@ -101,7 +130,7 @@ class WorkerClient(val hostname: String, val port: Int) {
   }
 
   def getIndexedRowMatrix_partitionComplete(handle: MatrixHandle) = {
-    val outbuf = ByteBuffer.allocate(4)
+    val outbuf = beginOutput(4)
     println(s"Finished getting rows on worker")
     outbuf.putInt(0x4) // typeCode = doneGettingRows
     sendMessage(outbuf)
@@ -301,20 +330,27 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
 }
 
 class Driver {
+  val listenSock = new java.net.ServerSocket(0);
+
   val driverProc: Process = {
     val pb = {
       if(System.getenv("NERSC_HOST") != null) {
-        throw new NotImplementedError()
-        val hostfilePath = s"${System.getenv("SPARK_WORKER_DIR")}/slaves.alchemist"
-        new ProcessBuilder("srun", "-O", "-I30", "-N", "2", "-w", hostfilePath, "core/target/alchemist")
+        val sparkDriverNode = s"${System.getenv("SPARK_MASTER_NODE")}"
+        val hostfilePath = s"${System.getenv("SPARK_WORKER_DIR")}/hosts.alchemist"
+
+        new ProcessBuilder("/usr/bin/srun", "-O", "-I30", "-N", "2", "-w", hostfilePath,
+          "core/target/alchemist", sparkDriverNode, listenSock.getLocalPort().toString())
       } else {
-        new ProcessBuilder("mpirun", "-q", "-np", "4", "core/target/alchemist")
+        new ProcessBuilder("mpirun", "-q", "-np", "4", "core/target/alchemist",
+          "localhost", listenSock.getLocalPort().toString())
       }
     }
     pb.redirectError(ProcessBuilder.Redirect.INHERIT).start
   }
 
-  val client = new DriverClient(driverProc.getInputStream, driverProc.getOutputStream)
+  val driverSock = listenSock.accept()
+
+  val client = new DriverClient(driverSock.getInputStream, driverSock.getOutputStream)
 
   def stop(): Unit = {
     client.shutdown

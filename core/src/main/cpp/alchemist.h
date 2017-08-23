@@ -57,6 +57,27 @@ inline bool operator < (const MatrixHandle &lhs, const MatrixHandle &rhs) {
   return lhs.id < rhs.id;
 }
 
+struct MatrixDescriptor {
+  MatrixHandle handle;
+  size_t numRows;
+  size_t numCols;
+
+  explicit MatrixDescriptor() :
+      numRows(0), numCols(0) {
+  }
+
+  MatrixDescriptor(MatrixHandle handle, size_t numRows, size_t numCols) :
+      handle(handle), numRows(numRows), numCols(numCols) {
+  }
+
+  template <typename Archive>
+  void serialize(Archive &ar, const unsigned version) {
+    ar & handle;
+    ar & numRows;
+    ar & numCols;
+  }
+};
+
 struct WorkerInfo {
   std::string hostname;
   uint32_t port;
@@ -265,19 +286,14 @@ struct MatrixGetRowsCommand : Command {
 };
 
 struct NewMatrixCommand : Command {
-  MatrixHandle handle;
-  size_t numRows;
-  size_t numCols;
+  MatrixDescriptor info;
   std::vector<WorkerId> layout;
 
-  explicit NewMatrixCommand() :
-      numRows(0), numCols(0) {
+  explicit NewMatrixCommand() {
   }
 
-  NewMatrixCommand(MatrixHandle handle, size_t numRows, size_t numCols,
-        const std::vector<WorkerId> &layout) :
-      handle(handle), numRows(numRows), numCols(numCols),
-      layout(layout) {
+  NewMatrixCommand(const MatrixDescriptor &info, const std::vector<WorkerId> &layout) :
+    info(info), layout(layout) {
   }
 
   virtual void run(Worker *self) const;
@@ -285,14 +301,12 @@ struct NewMatrixCommand : Command {
   template <typename Archive>
   void serialize(Archive &ar, const unsigned version) {
     ar & serialization::base_object<Command>(*this);
-    ar & handle;
-    ar & numRows;
-    ar & numCols;
+    ar & info;
     ar & layout;
   }
 };
 
-int driverMain(const mpi::communicator &world);
+int driverMain(const mpi::communicator &world, int argc, char *argv[]);
 int workerMain(const mpi::communicator &world, const mpi::communicator &peers);
 
 } // namespace alchemist
@@ -361,6 +375,7 @@ namespace boost { namespace serialization {
 	}
 }} // namespace boost::serialization
 
+BOOST_CLASS_EXPORT_KEY(alchemist::MatrixDescriptor);
 BOOST_CLASS_EXPORT_KEY(alchemist::Command);
 BOOST_CLASS_EXPORT_KEY(alchemist::HaltCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::NewMatrixCommand);

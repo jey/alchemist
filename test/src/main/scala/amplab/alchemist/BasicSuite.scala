@@ -8,44 +8,56 @@ import org.apache.spark.mllib.clustering.KMeans
 import breeze.linalg.{DenseVector => BDV, max, min, DenseMatrix => BDM, norm, diag, svd}
 import breeze.numerics._
 
+// TODO: break into separate tests
+
 object BasicSuite {
+  def ticks(): Long = {
+    return System.currentTimeMillis();
+  }
+
   def main(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("Alchemist Test")
     val sc = new SparkContext(conf)
     System.err.println("test: creating alchemist")
     val al = new Alchemist(sc)
     System.err.println("test: done creating alchemist")
-    val sparkMatA = deterministicMatrix(sc, 30, 50, 1)
+    val sparkMatA = deterministicMatrix(sc, 5000, 1000, 1)
     sparkMatA.rows.cache
-    val sparkMatB = deterministicMatrix(sc, 50, 20, 10)
+    val sparkMatB = deterministicMatrix(sc, 1000, 400, 10)
     sparkMatB.rows.cache
 
-    // // Spark matrix multiply
-    // val sparkMatC = sparkMatA.toBlockMatrix(sparkMatA.numRows.toInt, sparkMatA.numCols.toInt).
-    //               multiply(sparkMatB.toBlockMatrix(sparkMatB.numRows.toInt, sparkMatB.numCols.toInt)).toIndexedRowMatrix
+    // TEST: Alchemist matrix multiply
+    val txStart = ticks()
+    val alMatA = AlMatrix(al, sparkMatA)
+    val alMatB = AlMatrix(al, sparkMatB)
+    val txEnd = ticks()
+    val mulStart = txEnd
+    val alMatC = al.matMul(alMatA, alMatB)
+    val mulEnd = ticks()
+    val alRes = alMatC.getIndexedRowMatrix()
+    assert(alRes.numRows == sparkMatA.numRows)
+    assert(alRes.numCols == sparkMatB.numCols)
+    System.err.println(s"TICKS: tx=${(txEnd-txStart)/1000.0}, mul=${(mulEnd-mulStart)/1000.0}")
 
     // TEST: check that sending/receiving matrices works
-    //println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
-    //println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
-    //println("alResLocalMat:")
-    //displayBDM(alResLocalMat)
-    //println("sparkLocalMat:")
-    //displayBDM(sparkLocalMat)
-    
-    // TEST: Alchemist matrix multiply
-    //val alMatA = AlMatrix(al, sparkMatA)
-    //val alMatB = AlMatrix(al, sparkMatB)
-    //val alMatC = al.matMul(alMatA, alMatB)
-    //val alRes = alMatC.getIndexedRowMatrix()
-    //assert(alRes.numRows == sparkMatA.numRows)
-    //assert(alRes.numCols == sparkMatB.numCols)
+    println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
+    println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
 
-    //val alResLocalMat = toLocalMatrix(alRes)
-    //val sparkLocalMat = toLocalMatrix(sparkMatC)
-    //val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
-    //println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
+    /*
+    // // Spark matrix multiply
+    val sparkMatC = sparkMatA.toBlockMatrix(sparkMatA.numRows.toInt, sparkMatA.numCols.toInt).
+                  multiply(sparkMatB.toBlockMatrix(sparkMatB.numRows.toInt, sparkMatB.numCols.toInt)).toIndexedRowMatrix
+    val alResLocalMat = toLocalMatrix(alRes)
+    val sparkLocalMat = toLocalMatrix(sparkMatC)
+    val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
+    println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
+    */
 
+    al.stop
+    sc.stop
+  }
 
+  def notCurrentlyMain() = {
     //// TEST: check SVD
     //// TODO: check U,V orthonormal
     //// check U*S*V is original matrix
@@ -76,8 +88,9 @@ object BasicSuite {
     displayBDM(alCenters.getIndexedRowMatrix())
     println(rowAssignments.groupBy(_ + 0).mapValues(_.length).toList)
     println(alAssignmentsLocalMat.data.groupBy(_ + 0).mapValues(_.length).toList)
-    
     */
+
+    /*
     // TEST: larger k-means
     val n : Int = 10000;
     val d : Int = 780;
@@ -99,6 +112,7 @@ object BasicSuite {
     println(s"Alchemist kmeans: ${kmeansDuration}")
     println(s"Alchemist iters: ${numIters}")
     println(s"Spark kmeans: ${sparkKmeansDuration}")
+    */
 
     /*
     // TEST truncatedSVD
@@ -132,8 +146,6 @@ object BasicSuite {
     println(s"Alchemist transfer: ${transferDuration}, svd: ${svdDuration}")
     println(s"Spark svd: ${sparkSVDDuration}")
     */
-    al.stop
-    sc.stop
   }
 
   implicit def arrayofIntsToLocalMatrix(arr: Array[Int]) : BDM[Double] = {
