@@ -6,10 +6,10 @@ set -o errexit
 #
 #   ssh cori
 #   cd $SCRATCH
-#   mkdir alchemist
-#   cd alchemist
-#   git clone https://github.com/jey/alchemist
-#   ./alchemist/cori/bootstrap.sh
+#   mkdir alchemistBase
+#   cd alchemistBase
+#   git clone https://github.com/alexgittens/alchemist.git
+#   bash ./alchemist/setup/cori-bootstrap.sh
 #
 
 ALROOT=$PWD
