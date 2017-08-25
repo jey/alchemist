@@ -1,3 +1,8 @@
+# to be run once you have launched a batch/interactive job on Cori:
+# loads the spark module and splits the nodes between Alchemist and Spark evenly,
+# loads needed modules to run/compile Alchemist, and sets appropriate paths and variables
+# to run/compile Alchemist
+
 module load spark/2.1.0
 [[ $SPARKURL =~ spark://(.*):(.*) ]]
 export SPARK_MASTER_NODE=${BASH_REMATCH[1]}

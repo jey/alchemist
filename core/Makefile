@@ -13,7 +13,11 @@ CXXFLAGS += "-I$(ALPREFIX)/include"
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
 LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack 
 LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
-LDFLAGS += -Wl,-rpath,/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/
+
+# poor heuristic to check if on Cori, and fix a linkage issue that shouldn't be occurring
+ifeq ($(shell uname), "Linux")
+	LDFLAGS += -Wl,-rpath,/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/
+endif
 
 ifeq ($(shell uname), "Darwin")
   LDFLAGS += -lmpi
