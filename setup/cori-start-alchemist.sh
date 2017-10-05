@@ -25,7 +25,7 @@ popd
 # start spark on half the nodes
 start-all.sh
 # start alchemist on the other half (can't do this from spark driver b/c it needs to be run from the mom node)
-NUMALPROCS=`wc -l $SPARK_WORKER_DIR/hosts.alchemist`
+NUMALPROCS=`wc -l $SPARK_WORKER_DIR/hosts.alchemist | cut -f 1 -d' '`
 srun -N $NUMALPROCS -n $NUMALPROCS -w $SPARK_WORKER_DIR/hosts.alchemist core/target/alchemist &
 
 module unload PrgEnv-intel
