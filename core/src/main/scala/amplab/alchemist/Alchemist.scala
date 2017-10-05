@@ -4,7 +4,7 @@ import org.apache.spark.mllib.linalg.DenseVector
 import scala.collection.JavaConverters._
 import scala.util.Random
 import java.io.{
-    PrinterWriter, FileOutputStream,
+    PrintWriter, FileOutputStream,
     InputStream, OutputStream,
     DataInputStream => JDataInputStream,
     DataOutputStream => JDataOutputStream
@@ -338,9 +338,9 @@ class Driver {
       if(System.getenv("NERSC_HOST") != null) {
         val sparkDriverNode = s"${System.getenv("SPARK_MASTER_NODE")}"
         val hostfilePath = s"${System.getenv("SPARK_WORKER_DIR")}/hosts.alchemist"
-        val sockPath = s"${System.getenv("SPARK_WORKER_DIR")/connection.info"
+        val sockPath = s"${System.getenv("SPARK_WORKER_DIR")}/connection.info"
 
-        val pw = new PrinterWriter(new FileOutputStream(sockPath, false))
+        val pw = new PrintWriter(new FileOutputStream(sockPath, false))
         pw.write(s"${sparkDriverNode},${listenSock.getLocalPort().toString()}")
         pw.close
         // dummy process

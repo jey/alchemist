@@ -30,7 +30,7 @@ struct Driver {
   uint32_t nextMatrixId;
   std::shared_ptr<spdlog::logger> log;
 
-  Driver(const mpi::communicator &world, std::istream &is, std::ostream &os);
+  Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log);
   void issue(const Command &cmd);
   MatrixHandle registerMatrix(size_t numRows, size_t numCols);
   int main();
@@ -45,8 +45,8 @@ struct Driver {
   void handle_truncatedSVD();
 };
 
-Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os) :
-    world(world), input(is), output(os), nextMatrixId(42) {
+Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
+    world(world), input(is), output(os), log(log), nextMatrixId(42) {
 }
 
 void Driver::issue(const Command &cmd) {
@@ -515,9 +515,15 @@ void Driver::handle_newMatrix() {
   output.flush();
 }
 
+inline bool exist_test (const std::string& name) {
+    struct stat buffer;
+    return (stat(name.c_str(), &buffer) == 0); 
+}
+
 int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
   //log to console as well as file (single-threaded logging)
   //TODO: allow to specify log directory, log level, etc.
+  std::shared_ptr<spdlog::logger> log;
   std::vector<spdlog::sink_ptr> sinks;
   sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>());
   sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>("driver.log"));
@@ -526,13 +532,14 @@ int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
   log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
   log->info("Started Driver");
 
-  using boost::asio::ip::tcp;
-  boost::asio::ip::tcp::io stream;
+  char machine[255];
+  char port[255];
 
   if (argc == 3) { // we are on a non-NERSC system, so passed in Spark driver machine name and port
       log->info("Non-NERSC system assumed");
       log->info("Connecting to Spark executor at {}:{}", argv[1], argv[2]);
-      stream = boost::asio::ip::tcp::io(argv[1], argv[2]);
+      std::strcpy(machine, argv[1]);
+      std::strcpy(port, argv[2]);
   } else { // assume we are on NERSC, so look in a specific location for a file containing the machine name and port
       char const* tmp = std::getenv("SPARK_WORKER_DIR");
       std::string sockPath;
@@ -545,10 +552,6 @@ int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
       log->info("NERSC system assumed");
       log->info("Searching for connection information in file {}", sockPath);
 
-      inline bool exist_test (const std::string& name) {
-            struct stat buffer;
-            return (stat(name.c_str(), &buffer) == 0); 
-      }
       while(!exist_test(sockPath)) {
           boost::this_thread::sleep_for(boost::chrono::milliseconds(50));
       }
@@ -556,18 +559,25 @@ int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
       // TODO: need a more robust way of ensuring this is the case
       boost::this_thread::sleep_for(boost::chrono::milliseconds(500));
 
+      std::string sockSpec;
+      std::ifstream infile(sockPath);
+      std::getline(infile, sockSpec);
+      infile.close();
       boost::tokenizer<> tok(sockSpec);
       boost::tokenizer<>::iterator iter=tok.begin();
       std::string machineName = *iter;
       std::string portName = *(++iter);
 
       log->info("Connecting to Spark executor at {}:{}", machineName, portName);
-      stream = boost::asio::ip::tcp::io(machineName.c_str(), portName.c_str());
+      strcpy(machine, machineName.c_str());
+      strcpy(port, portName.c_str());
   }
 
+  using boost::asio::ip::tcp;
+  boost::asio::ip::tcp::iostream stream(machine, port);
   ENSURE(stream);
   stream.rdbuf()->non_blocking(false);
-  auto result = Driver(world, stream, stream).main();
+  auto result = Driver(world, stream, stream, log).main();
   return result;
 }
 

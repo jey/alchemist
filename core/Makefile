@@ -11,7 +11,7 @@ CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
 CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -O1
 CXXFLAGS += "-I$(ALPREFIX)/include"
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
-LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack 
+LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack -lboost_thread
 LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 
 # poor heuristic to check if on Cori, and fix a linkage issue that shouldn't be occurring
