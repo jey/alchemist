@@ -287,13 +287,12 @@ struct MatrixGetRowsCommand : Command {
 
 struct NewMatrixCommand : Command {
   MatrixDescriptor info;
-  std::vector<WorkerId> layout;
 
   explicit NewMatrixCommand() {
   }
 
-  NewMatrixCommand(const MatrixDescriptor &info, const std::vector<WorkerId> &layout) :
-    info(info), layout(layout) {
+  NewMatrixCommand(const MatrixDescriptor &info) :
+    info(info) {
   }
 
   virtual void run(Worker *self) const;
@@ -302,7 +301,6 @@ struct NewMatrixCommand : Command {
   void serialize(Archive &ar, const unsigned version) {
     ar & serialization::base_object<Command>(*this);
     ar & info;
-    ar & layout;
   }
 };
 

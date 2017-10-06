@@ -29,7 +29,7 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     al.client.getIndexedRowMatrixStart(handle, full_layout)
     val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
       val worker = ctx.connectWorker(layout(idx))
-      val result  = rowindices.toList.map { rowIndex => 
+      val result  = rowindices.toList.map { rowIndex =>
         new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex, numCols))
       }.iterator
 //      worker.getIndexedRowMatrix_partitionComplete(handle)
@@ -41,7 +41,7 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     result.rows.count
     al.client.getIndexedRowMatrixFinish(handle)
     result
-  } 
+  }
 
 }
 
@@ -49,17 +49,21 @@ object AlMatrix {
   def apply(al: Alchemist, mat: IndexedRowMatrix): AlMatrix = {
     val ctx = al.context
     val workerIds = ctx.workerIds
-    val layout = mat.rows.partitions.zipWithIndex.map {
-      case (part, idx) => workerIds(idx % workerIds.length)
-    }.toArray
-    val handle = al.client.newMatrixStart(mat.numRows, mat.numCols, layout)
+    val (handle, rowWorkerAssignments) = al.client.newMatrixStart(mat.numRows, mat.numCols)
     mat.rows.mapPartitionsWithIndex { (idx, part) =>
-      val client = ctx.connectWorker(layout(idx))
-      part.foreach { row =>
-        client.newMatrix_addRow(handle, row.index, row.vector.toArray)
+      val rows = part.toArray
+      var nodeClients : Map[WorkerId, WorkerClient] = Map()
+      rows.map( row => rowWorkerAssignments(row.index.toInt) ).distinct.foreach{
+        node => nodeClients += (node -> ctx.connectWorker(node))
       }
-      client.newMatrix_partitionComplete(handle)
-      client.close()
+      rows.foreach{ row =>
+        nodeClients(rowWorkerAssignments(row.index.toInt)).
+          newMatrix_addRow(handle, row.index, row.vector.toArray)
+      }
+      for( (node, client) <- nodeClients) {
+        client.newMatrix_partitionComplete(handle)
+        client.close()
+      }
       Iterator.single(true)
     }.count
     al.client.newMatrixFinish(handle)

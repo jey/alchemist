@@ -159,7 +159,7 @@ void Driver::handle_computeLowrankSVD() {
   MatrixHandle U;
   MatrixHandle S;
   MatrixHandle V;
-  
+
   // TODO: register the U, S, V factors with false newmatrixcommands to track them
   switch(whichFactors) {
     case 0: U = MatrixHandle{nextMatrixId++};
@@ -331,16 +331,16 @@ void Driver::handle_getTranspose() {
   MatrixHandle transposeHandle = registerMatrix(numRows, numCols);
   TransposeCommand cmd(inputMat, transposeHandle);
   issue(cmd);
-  
+
   world.barrier(); // wait for command to finish
   output.writeInt(0x1);
   output.writeInt(transposeHandle.id);
-  log->info("Wrote handle for transpose"); 
+  log->info("Wrote handle for transpose");
   output.writeInt(0x1);
   output.flush();
 }
 
-// CAVEAT: Assumes tall-and-skinny for now, doesn't allow many options for controlling 
+// CAVEAT: Assumes tall-and-skinny for now, doesn't allow many options for controlling
 // LIMITATIONS: assumes V small enough to fit on one machine (so can use ARPACK instead of PARPACK), but still distributes U,S,V and does distributed computations not needed
 void Driver::handle_truncatedSVD() {
   log->info("Starting truncated SVD computation");
@@ -369,7 +369,7 @@ void Driver::handle_truncatedSVD() {
     ++iterNum;
     if (prob.GetIdo() == 1 || prob.GetIdo() == -1) {
       command = 1;
-      mpi::broadcast(world, command, 0); 
+      mpi::broadcast(world, command, 0);
       mpi::broadcast(world, prob.GetVector(), n, 0);
       mpi::reduce(world, zerosVector.data(), n, prob.PutVector(), std::plus<double>(), 0);
     }
@@ -387,12 +387,12 @@ void Driver::handle_truncatedSVD() {
     std::memcpy(rightVecs.col(idx).data(), prob.RawEigenvector(idx), n*sizeof(double));
 
   // Populate U, V, S
-  command = 2; 
+  command = 2;
   mpi::broadcast(world, command, 0);
   mpi::broadcast(world, nconv, 0);
   mpi::broadcast(world, rightVecs.data(), n*nconv, 0);
   mpi::broadcast(world, prob.RawEigenvalues(), nconv, 0);
-  
+
   MatrixDescriptor Uinfo(UHandle, m, nconv);
   MatrixDescriptor Sinfo(SHandle, nconv, 1);
   MatrixDescriptor Vinfo(VHandle, n, nconv);
@@ -496,24 +496,33 @@ void Driver::handle_newMatrix() {
   // read args
   uint64_t numRows = input.readLong();
   uint64_t numCols = input.readLong();
-  uint64_t layoutLen = input.readLong();
-  std::vector<uint32_t> layout;
-  layout.reserve(layoutLen);
-  for(uint64_t part = 0; part < layoutLen; ++part) {
-    layout.push_back(input.readInt());
-  }
 
   // assign id and notify workers
   MatrixHandle handle = registerMatrix(numRows, numCols);
-  NewMatrixCommand cmd(matrices[handle], layout);
+  NewMatrixCommand cmd(matrices[handle]);
   issue(cmd);
 
-  // tell spark to start loading
-  output.writeInt(0x1);  // statusCode
+  output.writeInt(0x1);
   output.writeInt(handle.id);
   output.flush();
 
-  // wait for it to finish...
+  // tell spark which worker expects each row
+  std::vector<int> rowWorkerAssignments(numRows, 0);
+  std::vector<uint64_t> rowsOnWorker;
+  for(int workerIdx = 1; workerIdx < world.size(); workerIdx++) {
+    world.recv(workerIdx, 0, rowsOnWorker);
+    world.barrier();
+    for(auto rowIdx: rowsOnWorker) {
+      rowWorkerAssignments[rowIdx] = workerIdx;
+    }
+  }
+
+  output.writeInt(0x1); // statusCode
+  for(auto workerIdx: rowWorkerAssignments)
+    output.writeInt(workerIdx);
+  output.flush();
+
+  // wait for spark to finish loading the data ...
   world.barrier();
   output.writeInt(0x1);  // statusCode
   output.flush();

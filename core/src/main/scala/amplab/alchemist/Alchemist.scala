@@ -177,7 +177,7 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
   }
 
   def getTranspose(handle: MatrixHandle) : MatrixHandle = {
-    output.writeInt(0x6) 
+    output.writeInt(0x6)
     output.writeInt(handle.id)
     output.flush()
     if (input.readInt() != 0x1) {
@@ -192,11 +192,11 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
   }
 
   def truncatedSVD(mat: MatrixHandle, k: Int) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
-    output.writeInt(0x8) 
+    output.writeInt(0x8)
     output.writeInt(mat.id)
     output.writeInt(k)
     output.flush()
-  
+
     if (input.readInt() != 0x1) {
       throw new ProtocolError()
     }
@@ -208,7 +208,7 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return (UHandle, SHandle, VHandle)
   }
 
-  def kMeans(mat: MatrixHandle, k : Int = 2, maxIters : Int = 20, 
+  def kMeans(mat: MatrixHandle, k : Int = 2, maxIters : Int = 20,
              epsilon: Double = 1e-4, initMode: String = "k-means||", initSteps: Int = 2, seed: Long = 0) : Tuple3[MatrixHandle, MatrixHandle, Int] = {
     val method : Int = initMode match {
       case s if s matches "(?i)random" => 0
@@ -228,7 +228,7 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     output.flush()
 
     if (input.readInt() != 0x1) {
-      throw new ProtocolError() 
+      throw new ProtocolError()
     }
     val assignmentsHandle = new MatrixHandle(input.readInt())
     val centersHandle = new MatrixHandle(input.readInt())
@@ -251,20 +251,37 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return (Uhandle, Shandle, Vhandle)
   }
 
-  // layout contains one worker ID per matrix partition
-  def newMatrixStart(rows: Long, cols: Long, layout: Array[WorkerId]): MatrixHandle = {
+  // creates a MD, STAR matrix 
+  // caveat: assumes there are an INT number of rows due to Java array size limitations
+  def newMatrixStart(rows: Long, cols: Long): Tuple2[MatrixHandle, Array[WorkerId]] = {
     output.writeInt(0x1)
     output.writeLong(rows)
     output.writeLong(cols)
-    output.writeLong(layout.length)
-    layout.map(w => output.writeInt(w.id))
     output.flush()
+
+    // get matrix handle
     if(input.readInt() != 0x1) {
       throw new ProtocolError()
     }
     val handle = new MatrixHandle(input.readInt())
     System.err.println(s"got handle: ${handle.id}")
-    return handle
+
+    // alchemist returns an array whose ith entry is the world rank of the alchemist
+    // worker that will take the ith row
+    // workerIds on the spark side start at 0, so subtract 1
+    if(input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+    var rowWorkerAssignments : Array[WorkerId] = new Array[WorkerId](rows.toInt)
+    var rawrowWorkerAssignments : Array[Int] = new Array[Int](rows.toInt)
+    for( i <- 0 until rows.toInt) {
+      rowWorkerAssignments(i) = new WorkerId(input.readInt() - 1)
+      rawrowWorkerAssignments(i) = rowWorkerAssignments(i).id
+    }
+    val spacer=" "
+    System.err.println(s"row assignments: ${rawrowWorkerAssignments.distinct.mkString(spacer)}")
+
+    return (handle, rowWorkerAssignments)
   }
 
   def matrixMulStart(matA: MatrixHandle, matB: MatrixHandle) : MatrixHandle = {
@@ -282,14 +299,14 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
 
   def matrixMulFinish(mat: MatrixHandle) = {
     if(input.readInt() != 0x1) {
-      throw new ProtocolError() 
-    } 
+      throw new ProtocolError()
+    }
   }
 
   def matrixSVDFinish(mat: MatrixHandle) = {
     if(input.readInt() != 0x1) {
       throw new ProtocolError()
-    } 
+    }
     System.err.println(s"Finished computing the SVD for handle ${mat.id} successfully")
   }
 
