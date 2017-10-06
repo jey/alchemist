@@ -4,8 +4,37 @@
 # loads needed modules to run/compile Alchemist, and sets appropriate paths and variables
 # to run/compile Alchemist
 
+###############################################
+##### Setup building environment ##############
+###############################################
+
 # need to update this variable depending on where you installed alchemist
 export ALPREFIX=$SCRATCH/alchemistSHELL/bins
+
+module unload PrgEnv-intel
+module load PrgEnv-gnu
+module load gcc
+module load java
+module load python
+module load boost
+module load cmake
+module load sbt
+
+# the library paths probably don't need to be set, as alchemist is build with everything in rpath
+export PATH=$ALPREFIX/bin:$PATH
+export CPATH=$ALPREFIX/include:$CPATH
+export LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
+export LD_LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
+# probably don't need the next two lines
+export LIBRARY_PATH=$BOOST_DIR/lib:$LIBRARY_PATH
+export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/:$LD_LIBRARY_PATH
+export CC="cc"
+export CXX="CC"
+export FC="ftn"
+
+###############################################
+##### Start Spark and Alchemist  ##############
+###############################################
 
 module load spark/2.1.0
 [[ $SPARKURL =~ spark://(.*):(.*) ]]
@@ -25,25 +54,7 @@ popd
 # start spark on half the nodes
 start-all.sh
 # start alchemist on the other half (can't do this from spark driver b/c it needs to be run from the mom node)
+# NB: SRUN NEEDS AN ABSOLUTE PATH TO THE EXECUTABLE
 NUMALPROCS=`wc -l $SPARK_WORKER_DIR/hosts.alchemist | cut -f 1 -d' '`
-srun -N $NUMALPROCS -n $NUMALPROCS -w $SPARK_WORKER_DIR/hosts.alchemist core/target/alchemist &
+srun -N $NUMALPROCS -n $NUMALPROCS -w $SPARK_WORKER_DIR/hosts.alchemist ./core/target/alchemist &
 
-module unload PrgEnv-intel
-module load PrgEnv-gnu
-module load gcc
-module load java
-module load python
-module load boost
-module load cmake
-module load sbt
-
-export PATH=$ALPREFIX/bin:$PATH
-export CPATH=$ALPREFIX/include:$CPATH
-export LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
-export LD_LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
-# probably don't need the next two lines
-export LIBRARY_PATH=$BOOST_DIR/lib:$LIBRARY_PATH
-export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/:$LD_LIBRARY_PATH
-export CC="cc"
-export CXX="CC"
-export FC="ftn"

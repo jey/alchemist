@@ -354,6 +354,7 @@ class Driver {
   }
 
   val driverSock = listenSock.accept()
+  System.err.println(s"accepting connection from alchemist driver on socket")
 
   val client = new DriverClient(driverSock.getInputStream, driverSock.getOutputStream)
 

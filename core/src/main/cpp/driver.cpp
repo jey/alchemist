@@ -69,7 +69,7 @@ int Driver::main() {
   for(auto id = 0; id < numWorkers; ++id) {
     world.recv(id + 1, 0, workers[id]);
   }
-  log->info("{} workers ready", numWorkers);
+  log->info("{} workers ready, sending hostnames and ports to Spark", numWorkers);
 
   // handshake
   ENSURE(input.readInt() == 0xABCD);
@@ -434,6 +434,8 @@ void Driver::handle_computeThinSVD() {
 void Driver::handle_matrixMul() {
   MatrixHandle matA{input.readInt()};
   MatrixHandle matB{input.readInt()};
+  log->info("Multiplying matrices {} and {}", matA, matB);
+
   auto numRows = matrices[matA].numRows;
   auto numCols = matrices[matB].numCols;
   MatrixHandle destHandle = registerMatrix(numRows, numCols);
@@ -528,8 +530,9 @@ int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
   sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>());
   sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>("driver.log"));
   log = std::make_shared<spdlog::logger>("driver", std::begin(sinks), std::end(sinks));
-  log->flush_on(spdlog::level::warn); // flush whenever warning or more critical message is logged
-  log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
+  //log->flush_on(spdlog::level::warn); // flush whenever warning or more critical message is logged
+  //log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
+  log->flush_on(spdlog::level::info); // flush always, for debugging
   log->info("Started Driver");
 
   char machine[255];
