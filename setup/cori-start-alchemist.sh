@@ -41,6 +41,9 @@ export PATH=$ALPREFIX/bin:$PATH
 export CPATH=$ALPREFIX/include:$CPATH
 export LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
 export LD_LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
+# probably don't need the next two lines
+export LIBRARY_PATH=$BOOST_DIR/lib:$LIBRARY_PATH
+export LD_LIBRARY_PATH=/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/:$LD_LIBRARY_PATH
 export CC="cc"
 export CXX="CC"
 export FC="ftn"
