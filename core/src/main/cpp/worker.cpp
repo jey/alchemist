@@ -720,6 +720,9 @@ struct WorkerClientReceiveHandler {
                 matrix->SetLocal(colIdx, localRowIdx, value);
                 dataPtr += 8;
               }
+              if(dataPtr != &inbuf[inbuf.size()]) {
+                log->warn("did not get a full row!");
+              }
               ENSURE(dataPtr == &inbuf[inbuf.size()]);
               log->info("Successfully received row {} of matrix {}", rowIdx, handle.id);
               rowsCompleted++;
@@ -761,9 +764,10 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
       }
     }
     pfds.push_back(pollfd{listenSock, POLLIN}); // must be last entry
-    int count = poll(&pfds[0], pfds.size(), -1);
+    int count = poll(&pfds[0], pfds.size(), -1); 
     if(count == -1 && (errno == EAGAIN || errno == EINTR)) continue;
     ENSURE(count != -1);
+    log->info("Monitoring {} sockets (one is the listening socket)", pfds.size());
     for(size_t idx=0; idx < pfds.size() && count > 0; ++idx) {
       auto curSock = pfds[idx].fd;
       auto revents = pfds[idx].revents;
@@ -775,7 +779,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
           socklen_t addrlen = sizeof(addr);
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
-          ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
+          ENSURE(fcntl(clientSock, F_SETFL, O_NONBLOCK) != -1);
           std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, log, handle, numCols, localRowIndices, localData));
           clients.push_back(std::move(client));
         } else {
@@ -848,7 +852,7 @@ int Worker::main() {
   sockaddr_in addr = {AF_INET};
   ENSURE(bind(listenSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0);
   ENSURE(listen(listenSock, 1024) == 0);
-  ENSURE(fcntl(listenSock, F_SETFD, O_NONBLOCK) != -1);
+  ENSURE(fcntl(listenSock, F_SETFL, O_NONBLOCK) != -1);
   socklen_t addrlen = sizeof(addr);
   ENSURE(getsockname(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen) == 0);
   ENSURE(addrlen == sizeof(addr));

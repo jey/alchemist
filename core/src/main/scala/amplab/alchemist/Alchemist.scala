@@ -104,6 +104,7 @@ class WorkerClient(val hostname: String, val port: Int) {
     outbuf.position(outbuf.position() + 8 * vals.length)
     System.err.println(s"Sending row ${rowIdx} to ${hostname}:${port}")
     sendMessage(outbuf)
+    System.err.println(s"Sent row ${rowIdx} successfully")
   }
 
   def newMatrix_partitionComplete(handle: MatrixHandle) = {

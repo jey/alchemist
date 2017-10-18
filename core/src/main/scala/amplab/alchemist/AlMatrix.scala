@@ -64,7 +64,7 @@ object AlMatrix {
       var count = 0
       rows.foreach{ row =>
         count += 1
-        System.err.println(s"Sending row ${row.index.toInt}, ${count} of ${rows.length}")
+//        System.err.println(s"Sending row ${row.index.toInt}, ${count} of ${rows.length}")
         nodeClients(rowWorkerAssignments(row.index.toInt).id).get.
           newMatrix_addRow(handle, row.index, row.vector.toArray)
       }
