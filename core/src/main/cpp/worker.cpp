@@ -1,5 +1,6 @@
 #include "alchemist.h"
 #include <sys/socket.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -484,17 +485,16 @@ void NewMatrixCommand::run(Worker *self) const {
     if (matrix->IsLocalRow(rowIdx)) 
       rowsOnWorker.push_back(rowIdx);
 
-  for(int workerIdx = 1; workerIdx <= self->world.size(); workerIdx++) {
+  for(int workerIdx = 1; workerIdx < self->world.size(); workerIdx++) {
     if( self->world.rank() == workerIdx ) {
       self->world.send(0, 0, rowsOnWorker);
     }
     self->world.barrier();
   }
 
+  self->log->info("Starting to recieve my rows");
   self->receiveMatrixBlocks(handle);
-  self->peers.barrier();
-// permute the rows so that this node is actually holding the data Elemental thinks it is holding
-// relayout to MC, MR, BLOCK format
+  self->log->info("Received all my matrix rows");
   self->world.barrier();
 }
 
@@ -504,6 +504,7 @@ void HaltCommand::run(Worker *self) const {
 
 struct WorkerClientSendHandler {
   int sock;
+  std::shared_ptr<spdlog::logger> log;
   short pollEvents;
   std::vector<char> inbuf;
   std::vector<char> outbuf;
@@ -517,8 +518,8 @@ struct WorkerClientSendHandler {
   // only set POLLOUT when have data to send
   // sends 0x3 code (uint32), then matrix handle (uint32), then row index (long = uint64_t)
   // localData contains the rows of localRowIndices in order
-  WorkerClientSendHandler(int sock, MatrixHandle handle, size_t numCols, const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData) :
-    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(8 + numCols * 8), inpos(0), outpos(0),
+  WorkerClientSendHandler(int sock, std::shared_ptr<spdlog::logger> log, MatrixHandle handle, size_t numCols, const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData) :
+    sock(sock), log(log), pollEvents(POLLIN), inbuf(16), outbuf(8 + numCols * 8), inpos(0), outpos(0),
     localRowIndices(localRowIndices), localData(localData), handle(handle), numCols(numCols) {
   }
 
@@ -548,6 +549,7 @@ struct WorkerClientSendHandler {
         //std::cerr << format("%s: read: sock=%s, inbuf=%s, inpos=%s, count=%s\n")
         //    % world.rank() % sock % inbuf.size() % inpos % count;
         if (count == 0) {
+          // means the other side has closed the socket
           break;
         } else if( count == -1) {
           if(errno == EAGAIN) {
@@ -645,9 +647,10 @@ struct WorkerClientReceiveHandler {
   size_t pos;
   DistMatrix *matrix;
   MatrixHandle handle;
+  std::shared_ptr<spdlog::logger> log;
 
-  WorkerClientReceiveHandler(int sock, MatrixHandle handle, DistMatrix *matrix) :
-      sock(sock), pollEvents(POLLIN), inbuf(matrix->Width() * 8 + 24),
+  WorkerClientReceiveHandler(int sock, std::shared_ptr<spdlog::logger> log, MatrixHandle handle, DistMatrix *matrix) :
+      sock(sock), log(log), pollEvents(POLLIN), inbuf(matrix->Width() * 8 + 24),
       pos(0), matrix(matrix), handle(handle) {
   }
 
@@ -667,10 +670,12 @@ struct WorkerClientReceiveHandler {
 
   int handleEvent(short revents) {
     mpi::communicator world;
-    int partitionsCompleted = 0;
+    int rowsCompleted = 0;
     if(revents & POLLIN && pollEvents & POLLIN) {
       while(!isClosed()) {
+        log->info("waiting on socket");
         int count = recv(sock, &inbuf[pos], inbuf.size() - pos, 0);
+        log->info("count of received bytes {}", count);
         if(count == 0) {
           break;
         } else if(count == -1) {
@@ -678,11 +683,14 @@ struct WorkerClientReceiveHandler {
             // no more input available until next POLLIN
             break;
           } else if(errno == EINTR) {
+            log->warn("Connection interrupted");
             continue;
           } else if(errno == ECONNRESET) {
+            log->warn("Connection reset");
             close();
             break;
           } else {
+            log->warn("Something else happened to the connection");
             // TODO
             abort();
           }
@@ -702,26 +710,37 @@ struct WorkerClientReceiveHandler {
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
               ENSURE(rowIdx < (size_t)matrix->Height());
+              ENSURE(matrix->IsLocalRow(rowIdx));
               ENSURE(htobe64(*(uint64_t*)dataPtr) == numCols * 8);
               dataPtr += 8;
-              matrix->Reserve(numCols);
-              for(size_t colIdx = 0; colIdx < numCols; ++colIdx) {
+              auto localRowIdx = matrix->LocalRow(rowIdx);
+              log->info("Receiving row {} of matrix {}, writing to local row {}", rowIdx, handle.id, localRowIdx);
+              for (size_t colIdx = 0; colIdx < numCols; ++colIdx) {
                 double value = ntohd(*(uint64_t*)dataPtr);
-                matrix->QueueUpdate(rowIdx, colIdx, value);
+                matrix->SetLocal(colIdx, localRowIdx, value);
                 dataPtr += 8;
               }
               ENSURE(dataPtr == &inbuf[inbuf.size()]);
+              log->info("Successfully received row {} of matrix {}", rowIdx, handle.id);
+              rowsCompleted++;
               pos = 0;
             } else if(typeCode == 0x2) {
-              // partitionComplete
-              partitionsCompleted++;
+              log->info("All the rows coming to me from one Spark executor have been received");
+              /**struct sockaddr_storage addr;
+              socklen_t len;
+              char peername[255];
+              int result = getpeername(sock, (struct sockaddr*)&addr, &len);
+              ENSURE(result == 0);
+              getnameinfo((struct sockaddr*)&addr, len, peername, 255, NULL, 0, 0);
+              log->info("Received {} rows from {}", rowsCompleted, peername);
+              **/
               pos = 0;
             }
           }
         }
       }
     }
-    return partitionsCompleted;
+    return rowsCompleted;
   }
 };
 
@@ -757,7 +776,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
           ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
-          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, handle, numCols, localRowIndices, localData));
+          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, log, handle, numCols, localRowIndices, localData));
           clients.push_back(std::move(client));
         } else {
           ENSURE(clients[idx]->sock == curSock);
@@ -774,6 +793,7 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
   std::vector<pollfd> pfds;
   uint64_t rowsLeft = matrices[handle].get()->LocalHeight(); 
   while(rowsLeft > 0) {
+    log->info("{} rows remaining", rowsLeft);
     pfds.clear();
     for(auto it = clients.begin(); it != clients.end();) {
       const auto &client = *it;
@@ -800,7 +820,7 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
           ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
-          std::unique_ptr<WorkerClientReceiveHandler> client(new WorkerClientReceiveHandler(clientSock, handle, matrices[handle].get()));
+          std::unique_ptr<WorkerClientReceiveHandler> client(new WorkerClientReceiveHandler(clientSock, log, handle, matrices[handle].get()));
           clients.push_back(std::move(client));
         } else {
           ENSURE(clients[idx]->sock == curSock);
@@ -809,7 +829,6 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
       }
     }
   }
-  std::cerr << format("%s: finished receiving blocks\n") % world.rank();
 }
 
 int Worker::main() {
@@ -821,7 +840,7 @@ int Worker::main() {
   sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("rank-%d.log") % world.rank())));
   log = std::make_shared<spdlog::logger>( str(format("worker-%d") % world.rank()),
       std::begin(sinks), std::end(sinks));
-  log->flush_on(spdlog::level::warn);
+  log->flush_on(spdlog::level::info); // change to warn for production
   log->info("Started worker");
 
   // create listening socket, bind to an available port, and get the port number
@@ -840,6 +859,7 @@ int Worker::main() {
   ENSURE(gethostname(hostname, sizeof(hostname)) == 0);
   WorkerInfo info{hostname, port};
   world.send(0, 0, info);
+  log->info("Listening for a connection at {}:{}", hostname, port);
 
   // handle commands until done
   while(!shouldExit) {

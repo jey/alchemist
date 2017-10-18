@@ -63,7 +63,7 @@ int Driver::main() {
   sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>());
   sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>("driver.log"));
   log = std::make_shared<spdlog::logger>("driver", std::begin(sinks), std::end(sinks));
-  log->flush_on(spdlog::level::warn); // flush whenever warning or more critical message is logged
+  log->flush_on(spdlog::level::info); // flush whenever warning or more critical message is logged
   log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
   log->info("Started Driver");
 
@@ -90,7 +90,7 @@ int Driver::main() {
   bool shouldExit = false;
   while(!shouldExit) {
     uint32_t typeCode = input.readInt();
-    log->info("Received code {#x}", typeCode);
+    log->info("Received code {:#x}", typeCode);
 
     switch(typeCode) {
       // shutdown
@@ -516,16 +516,17 @@ void Driver::handle_newMatrix() {
       rowWorkerAssignments[rowIdx] = workerIdx;
     }
   }
-
+  log->info("Sending list of which worker each row should go to");
   output.writeInt(0x1); // statusCode
   for(auto workerIdx: rowWorkerAssignments)
     output.writeInt(workerIdx);
   output.flush();
 
-  // wait for spark to finish loading the data ...
+  // wait for spark to finish sending the data over to the alchemist executors ...
   world.barrier();
   output.writeInt(0x1);  // statusCode
   output.flush();
+  log->info("Entire matrix has been received");
 }
 
 int driverMain(const mpi::communicator &world, int argc, char *argv[]) {

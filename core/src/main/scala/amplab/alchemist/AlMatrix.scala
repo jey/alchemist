@@ -49,21 +49,31 @@ object AlMatrix {
   def apply(al: Alchemist, mat: IndexedRowMatrix): AlMatrix = {
     val ctx = al.context
     val workerIds = ctx.workerIds
+    // rowWorkerAssignments is an array of WorkerIds whose ith entry is the world rank of the alchemist worker
+    // that will take the ith row (ranging from 0 to numworkers-1). Note 0 is an executor, not the driver
     val (handle, rowWorkerAssignments) = al.client.newMatrixStart(mat.numRows, mat.numCols)
     mat.rows.mapPartitionsWithIndex { (idx, part) =>
       val rows = part.toArray
-      var nodeClients : Map[WorkerId, WorkerClient] = Map()
-      rows.map( row => rowWorkerAssignments(row.index.toInt) ).distinct.foreach{
-        node => nodeClients += (node -> ctx.connectWorker(node))
-      }
+      val relevantWorkers = rows.map(row => rowWorkerAssignments(row.index.toInt).id).distinct.map(id => new WorkerId(id))
+      val maxWorkerId = relevantWorkers.map(node => node.id).max
+      var nodeClients = Array.fill(maxWorkerId+1)(None: Option[WorkerClient])
+      System.err.println(s"Connecting to ${relevantWorkers.length} workers")
+      relevantWorkers.foreach(node => nodeClients(node.id) = Some(ctx.connectWorker(node)))
+
+      // TODO: randomize the order the rows are sent in to avoid queuing issues?
+      var count = 0
       rows.foreach{ row =>
-        nodeClients(rowWorkerAssignments(row.index.toInt)).
+        count += 1
+        System.err.println(s"Sending row ${row.index.toInt}, ${count} of ${rows.length}")
+        nodeClients(rowWorkerAssignments(row.index.toInt).id).get.
           newMatrix_addRow(handle, row.index, row.vector.toArray)
       }
-      for( (node, client) <- nodeClients) {
-        client.newMatrix_partitionComplete(handle)
-        client.close()
-      }
+      System.err.println("Finished sending rows")
+      nodeClients.foreach(client => 
+          if (client.isDefined) {
+            client.get.newMatrix_partitionComplete(handle)
+            client.get.close()
+          })
       Iterator.single(true)
     }.count
     al.client.newMatrixFinish(handle)
