@@ -1,3 +1,5 @@
+NB: make sure you're using the "cori-version" branch when trying to run Alchemist on Cori
+
 # To run Alchemist on Cori
 ```
 # launch in interactive mode w/ e.g.

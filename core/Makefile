@@ -8,7 +8,7 @@ TARGET_PATH = target
 # put libEl's CXXFLAGS in front so ours can override it
 CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
 #CXXFLAGS += -Wall
-CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -O1
+CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -O1 -fext-numeric-literals
 CXXFLAGS += "-I$(ALPREFIX)/include"
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
 LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack -lboost_thread
