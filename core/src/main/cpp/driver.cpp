@@ -471,14 +471,10 @@ void Driver::handle_getMatrixRows() {
   for(uint64_t part = 0; part < layoutLen; ++part) {
     layout.push_back(input.readInt());
   }
+  log->info("Returning matrix {} to Spark", handle);
 
   MatrixGetRowsCommand cmd(handle, layout);
   issue(cmd);
-
-//  std::cerr << "Layout for returning matrix: " << std::endl;
-//  for (auto i = layout.begin(); i != layout.end(); ++i)
-//    std::cerr << *i << " ";
-//  std::cerr << std::endl;
 
   // tell Spark to start asking for rows
   output.writeInt(0x1);
@@ -504,6 +500,7 @@ void Driver::handle_newMatrix() {
   // assign id and notify workers
   MatrixHandle handle = registerMatrix(numRows, numCols);
   NewMatrixCommand cmd(matrices[handle], layout);
+  log->info("Recieving new matrix {}, with dimensions {}x{}", handle, numRows, numCols);
   issue(cmd);
 
   // tell spark to start loading

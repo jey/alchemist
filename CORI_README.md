@@ -4,7 +4,6 @@
 # salloc -N 6 -t 30 -C haswell --qos=interactive -L SCRATCH
 # to get 3 Spark nodes (1 driver, 2 exec) and 3 Alchemist nodes (1 driver, 2 exec)
 cd $SCRATCH/alchemistSHELL/alchemist # or wherever you installed alchemist as instructed below
-export ALPREFIX=$SCRATCH/alchemistSHELL/bins # or whatever you used during install
 source setup/cori-start-alchemist.sh # will split nodes between Spark and Alchemist, and start Alchemist in background
 make check # will run the current test suite
 ```

@@ -34,24 +34,28 @@ object BasicSuite {
     val mulStart = txEnd
     val alMatC = al.matMul(alMatA, alMatB)
     val mulEnd = ticks()
+    val rcStart = ticks()
     val alRes = alMatC.getIndexedRowMatrix()
+    val rcEnd = ticks()
+
     assert(alRes.numRows == sparkMatA.numRows)
     assert(alRes.numCols == sparkMatB.numCols)
-    System.err.println(s"TICKS: tx=${(txEnd-txStart)/1000.0}, mul=${(mulEnd-mulStart)/1000.0}")
+    println(s"Alchemist matrix multiplication time(s): transmission=${(txEnd-txStart)/1000.0}, mul=${(mulEnd-mulStart)/1000.0}, receive=${(rcEnd-rcStart)/1000.0}")
 
     // TEST: check that sending/receiving matrices works
     println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
     println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
 
-    /*
     // // Spark matrix multiply
+    val smulStart = ticks()
     val sparkMatC = sparkMatA.toBlockMatrix(sparkMatA.numRows.toInt, sparkMatA.numCols.toInt).
                   multiply(sparkMatB.toBlockMatrix(sparkMatB.numRows.toInt, sparkMatB.numCols.toInt)).toIndexedRowMatrix
+    val smulEnd = ticks()
+    println(s"Spark matrix multiplication time(s): ${(smulEnd - smulStart)/1000.0}")
     val alResLocalMat = toLocalMatrix(alRes)
     val sparkLocalMat = toLocalMatrix(sparkMatC)
     val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
     println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
-    */
 
     al.stop
     sc.stop

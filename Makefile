@@ -10,7 +10,7 @@ build:
 
 .PHONY:
 check:
-	spark-submit --driver-memory 2g test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar
+	spark-submit --driver-memory 2g test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar | tee test.log
 	@echo test complete
 
 .PHONY: clean
