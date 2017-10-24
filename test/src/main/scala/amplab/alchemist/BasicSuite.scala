@@ -15,43 +15,46 @@ object BasicSuite {
     return System.currentTimeMillis();
   }
 
-  def main(args: Array[String]): Unit = {
+	def main(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("Alchemist Test")
     val sc = new SparkContext(conf)
+
+    val sparkMatA = deterministicMatrix(sc, 5000, 2000, 1)
+    sparkMatA.rows.cache
+    val sparkMatB = deterministicMatrix(sc, 2000, 5000, 10)
+    sparkMatB.rows.cache
+
     System.err.println("test: creating alchemist")
     val al = new Alchemist(sc)
     System.err.println("test: done creating alchemist")
-    val sparkMatA = deterministicMatrix(sc, 5000, 1000, 1)
-    sparkMatA.rows.cache
-    val sparkMatB = deterministicMatrix(sc, 1000, 400, 10)
-    sparkMatB.rows.cache
 
     // TEST: Alchemist matrix multiply
-    val txStart = ticks()
+    var txStart = ticks()
     val alMatA = AlMatrix(al, sparkMatA)
     val alMatB = AlMatrix(al, sparkMatB)
-    val txEnd = ticks()
-    val mulStart = txEnd
+    var txEnd = ticks()
+    var computeStart = txEnd
     val alMatC = al.matMul(alMatA, alMatB)
-    val mulEnd = ticks()
+    var computeEnd = ticks()
+    var rcStart = ticks()
     val alRes = alMatC.getIndexedRowMatrix()
-    assert(alRes.numRows == sparkMatA.numRows)
-    assert(alRes.numCols == sparkMatB.numCols)
-    System.err.println(s"TICKS: tx=${(txEnd-txStart)/1000.0}, mul=${(mulEnd-mulStart)/1000.0}")
+    var rcEnd = ticks()
+    System.err.println(s"Alchemist timing: send=${(txEnd-txStart)/1000.0}, mul=${(computeEnd-computeStart)/1000.0}, receive=${(rcEnd - rcStart)/1000.0}")
 
     // TEST: check that sending/receiving matrices works
     println(norm((toLocalMatrix(alMatB.getIndexedRowMatrix()) - toLocalMatrix(sparkMatB)).toDenseVector))
     println(norm((toLocalMatrix(alMatA.getIndexedRowMatrix()) - toLocalMatrix(sparkMatA)).toDenseVector))
 
-    /*
-    // // Spark matrix multiply
+    // Spark matrix multiply
+    computeStart = ticks()
     val sparkMatC = sparkMatA.toBlockMatrix(sparkMatA.numRows.toInt, sparkMatA.numCols.toInt).
                   multiply(sparkMatB.toBlockMatrix(sparkMatB.numRows.toInt, sparkMatB.numCols.toInt)).toIndexedRowMatrix
+    computeEnd = ticks()
+    System.err.println(s"Spark timing: mult=${(computeEnd - computeStart)/1000.0}")
     val alResLocalMat = toLocalMatrix(alRes)
     val sparkLocalMat = toLocalMatrix(sparkMatC)
     val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
-    println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
-    */
+    System.err.println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
 
     al.stop
     sc.stop
