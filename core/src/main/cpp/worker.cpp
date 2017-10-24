@@ -664,6 +664,7 @@ struct WorkerClientReceiveHandler {
 
   void close() {
     if(sock != -1) ::close(sock);
+    log->warn("Closed socket");
     sock = -1;
     pollEvents = 0;
   }
@@ -681,6 +682,7 @@ struct WorkerClientReceiveHandler {
         } else if(count == -1) {
           if(errno == EAGAIN) {
             // no more input available until next POLLIN
+            log->warn("EAGAIN encountered");
             break;
           } else if(errno == EINTR) {
             log->warn("Connection interrupted");
@@ -714,14 +716,11 @@ struct WorkerClientReceiveHandler {
               ENSURE(htobe64(*(uint64_t*)dataPtr) == numCols * 8);
               dataPtr += 8;
               auto localRowIdx = matrix->LocalRow(rowIdx);
-              log->info("Receiving row {} of matrix {}, writing to local row {}", rowIdx, handle.id, localRowIdx);
+              log->info("Received row {} of matrix {}, writing to local row {}", rowIdx, handle.id, localRowIdx);
               for (size_t colIdx = 0; colIdx < numCols; ++colIdx) {
                 double value = ntohd(*(uint64_t*)dataPtr);
-                matrix->SetLocal(colIdx, localRowIdx, value);
+                matrix->SetLocal(localRowIdx, matrix->LocalCol(colIdx), value); //LocalCal call should be unnecessary
                 dataPtr += 8;
-              }
-              if(dataPtr != &inbuf[inbuf.size()]) {
-                log->warn("did not get a full row!");
               }
               ENSURE(dataPtr == &inbuf[inbuf.size()]);
               log->info("Successfully received row {} of matrix {}", rowIdx, handle.id);

@@ -59,6 +59,7 @@ object AlMatrix {
       var nodeClients = Array.fill(maxWorkerId+1)(None: Option[WorkerClient])
       System.err.println(s"Connecting to ${relevantWorkers.length} workers")
       relevantWorkers.foreach(node => nodeClients(node.id) = Some(ctx.connectWorker(node)))
+      System.err.println(s"Successfully connected to all workers")
 
       // TODO: randomize the order the rows are sent in to avoid queuing issues?
       var count = 0
