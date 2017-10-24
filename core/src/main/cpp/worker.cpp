@@ -1,5 +1,6 @@
 #include "alchemist.h"
 #include <sys/socket.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -31,13 +32,13 @@ struct Worker {
     ENSURE(peers.rank() == world.rank() - 1);
   }
 
-  void receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId> &layout);
+  void receiveMatrixBlocks(MatrixHandle handle);
   void sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vector<WorkerId> &layout,
       const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData);
   int main();
 };
 
-uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & centers, 
+uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & centers,
     uint32_t * clusterSizes, std::vector<uint32_t> & rowAssignments, double & objVal) {
   uint32_t numCenters = centers.rows();
   VectorXd distanceSq(numCenters);
@@ -45,14 +46,14 @@ uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & c
   uint32_t numChanged = 0;
   objVal = 0.0;
 
-  for(uint32_t idx = 0; idx < numCenters; ++idx) 
-    clusterSizes[idx] = 0; 
-  
+  for(uint32_t idx = 0; idx < numCenters; ++idx)
+    clusterSizes[idx] = 0;
+
   for(El::Int rowIdx = 0; rowIdx < dataMat.rows(); ++rowIdx) {
-    for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx) 
+    for(uint32_t centerIdx = 0; centerIdx < numCenters; ++centerIdx)
       distanceSq[centerIdx] = (dataMat.row(rowIdx) - centers.row(centerIdx)).squaredNorm();
     objVal += distanceSq.minCoeff(&newAssignment);
-    if (rowAssignments[rowIdx] != newAssignment) 
+    if (rowAssignments[rowIdx] != newAssignment)
       numChanged += 1;
     rowAssignments[rowIdx] = newAssignment;
     clusterSizes[rowAssignments[rowIdx]] += 1;
@@ -62,7 +63,7 @@ uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & c
 }
 
 // TODO: add seed as argument (make sure different workers do different things)
-void kmeansParallelInit(Worker * self, DistMatrix const * dataMat, 
+void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
     MatrixXd const & localData, uint32_t scale, uint32_t initSteps, MatrixXd & clusterCenters, uint64_t seed) {
 
   auto d = localData.cols();
@@ -104,14 +105,14 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
     VectorXd distSq(initCenters.size());
     Z = 0;
     for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
-      for(uint32_t centerIdx = 0; centerIdx < initCenters.size(); ++centerIdx) 
+      for(uint32_t centerIdx = 0; centerIdx < initCenters.size(); ++centerIdx)
         distSq[centerIdx] = (localData.row(pointIdx) - initCenters[centerIdx]).squaredNorm();
       distSqToCenters[pointIdx] = distSq.minCoeff();
       Z += distSqToCenters[pointIdx];
     }
     mpi::all_reduce(self->peers, mpi::inplace_t<double>(Z), std::plus<double>());
 
-    // 2) sample your points accordingly 
+    // 2) sample your points accordingly
     std::vector<MatrixXd> localNewCenters;
     for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
       bool sampledQ = ( dis(gen) < ((double)scale) * distSqToCenters[pointIdx]/Z ) ? true : false;
@@ -119,8 +120,8 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
         localNewCenters.push_back(localData.row(pointIdx));
       }
     };
-    
-    // 3) have each worker broadcast out their sampled points to all other workers, 
+
+    // 3) have each worker broadcast out their sampled points to all other workers,
     // to update each worker's set of centers
     for(uint32_t root= 0; root < self->peers.size(); ++root) {
       if (root == self->peers.rank()) {
@@ -135,18 +136,18 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
   } // end for
 
   // figure out the number of points closest to each cluster center
-  std::vector<uint32_t> clusterSizes(initCenters.size(), 0); 
-  std::vector<uint32_t> localClusterSizes(initCenters.size(), 0); 
+  std::vector<uint32_t> clusterSizes(initCenters.size(), 0);
+  std::vector<uint32_t> localClusterSizes(initCenters.size(), 0);
   VectorXd distSq(initCenters.size());
   for(uint32_t pointIdx = 0; pointIdx < localData.rows(); ++pointIdx) {
-    for(uint32_t centerIdx = 0; centerIdx < initCenters.size(); ++centerIdx) 
+    for(uint32_t centerIdx = 0; centerIdx < initCenters.size(); ++centerIdx)
       distSq[centerIdx] = (localData.row(pointIdx) - initCenters[centerIdx]).squaredNorm();
     uint32_t clusterIdx;
     distSq.minCoeff(&clusterIdx);
     localClusterSizes[clusterIdx] += 1;
   }
 
-  mpi::all_reduce(self->peers, localClusterSizes.data(), localClusterSizes.size(), 
+  mpi::all_reduce(self->peers, localClusterSizes.data(), localClusterSizes.size(),
       clusterSizes.data(), std::plus<uint32_t>());
 
   // after centers have been sampled, sync back up with the driver,
@@ -173,7 +174,7 @@ void KMeansCommand::run(Worker *self) const {
   // relayout matrix if needed so that it is in row-partitioned format
   // cf http://libelemental.org/pub/slides/ICS13.pdf slide 19 for the cost of redistribution
   auto distData = origDataMat->DistData();
-  DistMatrix * dataMat = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, d, self->grid); 
+  DistMatrix * dataMat = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, d, self->grid);
   if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
    dataMat = origDataMat;
   } else {
@@ -195,11 +196,11 @@ void KMeansCommand::run(Worker *self) const {
   // and populate the local data matrix
 
   std::vector<El::Int> rowMap(localData.rows());
-  for(El::Int rowIdx = 0; rowIdx < n; ++rowIdx) 
+  for(El::Int rowIdx = 0; rowIdx < n; ++rowIdx)
     if (dataMat->IsLocalRow(rowIdx)) {
       auto localRowIdx = dataMat->LocalRow(rowIdx);
       rowMap[localRowIdx] = rowIdx;
-      for(El::Int colIdx = 0; colIdx < d; ++colIdx) 
+      for(El::Int colIdx = 0; colIdx < d; ++colIdx)
         localData(localRowIdx, colIdx) = dataMat->GetLocal(localRowIdx, colIdx);
     }
 
@@ -254,7 +255,7 @@ void KMeansCommand::run(Worker *self) const {
     // TODO: locally compute cluster sums and place in clusterCenters
     oldClusterCenters = clusterCenters;
     clusterCenters.setZero();
-    for(uint32_t rowIdx = 0; rowIdx < localData.rows(); ++rowIdx) 
+    for(uint32_t rowIdx = 0; rowIdx < localData.rows(); ++rowIdx)
       clusterCenters.row(rowAssignments[rowIdx]) += localData.row(rowIdx);
 
     mpi::all_reduce(self->peers, clusterCenters.data(), numCenters*d, centersBuf.data(), std::plus<double>());
@@ -324,16 +325,16 @@ void TruncatedSVDCommand::run(Worker *self) const {
     std::cerr << self->world.rank() << ": relayout took " << relayoutDuration.count() << "ms\n";
   }
 
-  // Retrieve your local block of rows and compute local contribution to A'*A 
+  // Retrieve your local block of rows and compute local contribution to A'*A
   MatrixXd localData(workingMat->LocalHeight(), n);
 
   auto startFillLocalMat = std::chrono::system_clock::now();
   std::vector<El::Int> rowMap(localData.rows());
-  for(El::Int rowIdx = 0; rowIdx < m; ++rowIdx) 
+  for(El::Int rowIdx = 0; rowIdx < m; ++rowIdx)
     if (workingMat->IsLocalRow(rowIdx)) {
       auto localRowIdx = workingMat->LocalRow(rowIdx);
       rowMap[localRowIdx] = rowIdx;
-      for(El::Int colIdx = 0; colIdx < n; ++colIdx) 
+      for(El::Int colIdx = 0; colIdx < n; ++colIdx)
         localData(localRowIdx, colIdx) = workingMat->GetLocal(localRowIdx, colIdx);
     }
   MatrixXd gramMat = localData.transpose()*localData;
@@ -346,8 +347,8 @@ void TruncatedSVDCommand::run(Worker *self) const {
   std::cerr << format("%s: finished inits \n") % self->world.rank();
 
   while(true) {
-    mpi::broadcast(self->world, command, 0); 
-    if (command == 1) { 
+    mpi::broadcast(self->world, command, 0);
+    if (command == 1) {
       mpi::broadcast(self->world, vecIn.get(), n, 0);
 
       auto startMvProd = std::chrono::system_clock::now();
@@ -378,14 +379,14 @@ void TruncatedSVDCommand::run(Worker *self) const {
 
       // populate V
       for(El::Int rowIdx=0; rowIdx < n; rowIdx++)
-        for(El::Int colIdx=0; colIdx < (El::Int) nconv; colIdx++) 
-          if(V->IsLocal(rowIdx, colIdx)) 
+        for(El::Int colIdx=0; colIdx < (El::Int) nconv; colIdx++)
+          if(V->IsLocal(rowIdx, colIdx))
             V->SetLocal(V->LocalRow(rowIdx), V->LocalCol(colIdx), rightEigs(rowIdx,colIdx));
       // populate S, Sinv
       for(El::Int idx=0; idx < (El::Int) nconv; idx++) {
-        if(S->IsLocal(idx, 0)) 
+        if(S->IsLocal(idx, 0))
           S->SetLocal(S->LocalRow(idx), 0, std::sqrt(singValsSq(idx)));
-        if(Sinv->IsLocal(idx, 0)) 
+        if(Sinv->IsLocal(idx, 0))
           Sinv->SetLocal(Sinv->LocalRow(idx), 0, 1/std::sqrt(singValsSq(idx)));
       }
 
@@ -406,7 +407,7 @@ void TransposeCommand::run(Worker *self) const {
   auto n = self->matrices[origMat]->Width();
   DistMatrix * transposeA = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, m, self->grid);
   El::Zero(*transposeA);
-  
+
   ENSURE(self->matrices.insert(std::make_pair(transposeMat, std::unique_ptr<DistMatrix>(transposeA))).second);
 
   El::Transpose(*self->matrices[origMat], *transposeA);
@@ -466,7 +467,7 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
         matrix->QueuePull(curRowIdx, col);
       }
     }
-  } 
+  }
   matrix->ProcessPullQueue(&localData[0]);
 
   self->sendMatrixRows(handle, matrix->Width(), layout, localRowIndices, localData);
@@ -475,12 +476,25 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 
 void NewMatrixCommand::run(Worker *self) const {
   auto handle = info.handle;
-  DistMatrix *matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(info.numRows, info.numCols, self->grid);
+  DistMatrix *matrix = new El::DistMatrix<double, El::MD, El::STAR>(info.numRows, info.numCols, self->grid);
   Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
-  self->receiveMatrixBlocks(handle, layout);
-  self->peers.barrier();
-  matrix->ProcessQueues();
+
+  std::vector<uint64_t> rowsOnWorker;
+  for(El::Int rowIdx = 0; rowIdx < info.numRows; ++rowIdx)
+    if (matrix->IsLocalRow(rowIdx)) 
+      rowsOnWorker.push_back(rowIdx);
+
+  for(int workerIdx = 1; workerIdx < self->world.size(); workerIdx++) {
+    if( self->world.rank() == workerIdx ) {
+      self->world.send(0, 0, rowsOnWorker);
+    }
+    self->world.barrier();
+  }
+
+  self->log->info("Starting to recieve my rows");
+  self->receiveMatrixBlocks(handle);
+  self->log->info("Received all my matrix rows");
   self->world.barrier();
 }
 
@@ -490,6 +504,7 @@ void HaltCommand::run(Worker *self) const {
 
 struct WorkerClientSendHandler {
   int sock;
+  std::shared_ptr<spdlog::logger> log;
   short pollEvents;
   std::vector<char> inbuf;
   std::vector<char> outbuf;
@@ -503,8 +518,8 @@ struct WorkerClientSendHandler {
   // only set POLLOUT when have data to send
   // sends 0x3 code (uint32), then matrix handle (uint32), then row index (long = uint64_t)
   // localData contains the rows of localRowIndices in order
-  WorkerClientSendHandler(int sock, MatrixHandle handle, size_t numCols, const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData) :
-    sock(sock), pollEvents(POLLIN), inbuf(16), outbuf(8 + numCols * 8), inpos(0), outpos(0),
+  WorkerClientSendHandler(int sock, std::shared_ptr<spdlog::logger> log, MatrixHandle handle, size_t numCols, const std::vector<uint64_t> &localRowIndices, const std::vector<double> &localData) :
+    sock(sock), log(log), pollEvents(POLLIN), inbuf(16), outbuf(8 + numCols * 8), inpos(0), outpos(0),
     localRowIndices(localRowIndices), localData(localData), handle(handle), numCols(numCols) {
   }
 
@@ -512,7 +527,7 @@ struct WorkerClientSendHandler {
     close();
   }
 
-  // note this is never used! (it should be, to remove the client from the set of clients being polled once the operation on that client is done 
+  // note this is never used! (it should be, to remove the client from the set of clients being polled once the operation on that client is done
   bool isClosed() const {
     return sock == -1;
   }
@@ -534,6 +549,7 @@ struct WorkerClientSendHandler {
         //std::cerr << format("%s: read: sock=%s, inbuf=%s, inpos=%s, count=%s\n")
         //    % world.rank() % sock % inbuf.size() % inpos % count;
         if (count == 0) {
+          // means the other side has closed the socket
           break;
         } else if( count == -1) {
           if(errno == EAGAIN) {
@@ -576,7 +592,7 @@ struct WorkerClientSendHandler {
               inpos = 0;
               pollEvents = POLLOUT; // after parsing the request, send the data
               break;
-            } 
+            }
           }
         }
       }
@@ -591,7 +607,7 @@ struct WorkerClientSendHandler {
         //std::cerr << format("%s: write: sock=%s, outbuf=%s, outpos=%s, count=%s\n")
         //    % world.rank() % sock % outbuf.size() % outpos % count;
         if (count == 0) {
-          break; 
+          break;
         } else if(count == -1) {
           if(errno == EAGAIN) {
             // out buffer is full for now, wait for next POLLOUT
@@ -605,7 +621,7 @@ struct WorkerClientSendHandler {
           } else {
             // TODO
             abort();
-          } 
+          }
         } else {
           ENSURE(count > 0);
           outpos += count;
@@ -631,9 +647,10 @@ struct WorkerClientReceiveHandler {
   size_t pos;
   DistMatrix *matrix;
   MatrixHandle handle;
+  std::shared_ptr<spdlog::logger> log;
 
-  WorkerClientReceiveHandler(int sock, MatrixHandle handle, DistMatrix *matrix) :
-      sock(sock), pollEvents(POLLIN), inbuf(matrix->Width() * 8 + 24),
+  WorkerClientReceiveHandler(int sock, std::shared_ptr<spdlog::logger> log, MatrixHandle handle, DistMatrix *matrix) :
+      sock(sock), log(log), pollEvents(POLLIN), inbuf(matrix->Width() * 8 + 24),
       pos(0), matrix(matrix), handle(handle) {
   }
 
@@ -647,28 +664,35 @@ struct WorkerClientReceiveHandler {
 
   void close() {
     if(sock != -1) ::close(sock);
+    log->warn("Closed socket");
     sock = -1;
     pollEvents = 0;
   }
 
   int handleEvent(short revents) {
     mpi::communicator world;
-    int partitionsCompleted = 0;
+    int rowsCompleted = 0;
     if(revents & POLLIN && pollEvents & POLLIN) {
       while(!isClosed()) {
+        log->info("waiting on socket");
         int count = recv(sock, &inbuf[pos], inbuf.size() - pos, 0);
+        log->info("count of received bytes {}", count);
         if(count == 0) {
           break;
         } else if(count == -1) {
           if(errno == EAGAIN) {
             // no more input available until next POLLIN
+            log->warn("EAGAIN encountered");
             break;
           } else if(errno == EINTR) {
+            log->warn("Connection interrupted");
             continue;
           } else if(errno == ECONNRESET) {
+            log->warn("Connection reset");
             close();
             break;
           } else {
+            log->warn("Something else happened to the connection");
             // TODO
             abort();
           }
@@ -688,26 +712,37 @@ struct WorkerClientReceiveHandler {
               uint64_t rowIdx = htobe64(*(uint64_t*)dataPtr);
               dataPtr += 8;
               ENSURE(rowIdx < (size_t)matrix->Height());
+              ENSURE(matrix->IsLocalRow(rowIdx));
               ENSURE(htobe64(*(uint64_t*)dataPtr) == numCols * 8);
               dataPtr += 8;
-              matrix->Reserve(numCols);
-              for(size_t colIdx = 0; colIdx < numCols; ++colIdx) {
+              auto localRowIdx = matrix->LocalRow(rowIdx);
+              log->info("Received row {} of matrix {}, writing to local row {}", rowIdx, handle.id, localRowIdx);
+              for (size_t colIdx = 0; colIdx < numCols; ++colIdx) {
                 double value = ntohd(*(uint64_t*)dataPtr);
-                matrix->QueueUpdate(rowIdx, colIdx, value);
+                matrix->SetLocal(localRowIdx, matrix->LocalCol(colIdx), value); //LocalCal call should be unnecessary
                 dataPtr += 8;
               }
               ENSURE(dataPtr == &inbuf[inbuf.size()]);
+              log->info("Successfully received row {} of matrix {}", rowIdx, handle.id);
+              rowsCompleted++;
               pos = 0;
             } else if(typeCode == 0x2) {
-              // partitionComplete
-              partitionsCompleted++;
+              log->info("All the rows coming to me from one Spark executor have been received");
+              /**struct sockaddr_storage addr;
+              socklen_t len;
+              char peername[255];
+              int result = getpeername(sock, (struct sockaddr*)&addr, &len);
+              ENSURE(result == 0);
+              getnameinfo((struct sockaddr*)&addr, len, peername, 255, NULL, 0, 0);
+              log->info("Received {} rows from {}", rowsCompleted, peername);
+              **/
               pos = 0;
             }
           }
         }
       }
     }
-    return partitionsCompleted;
+    return rowsCompleted;
   }
 };
 
@@ -727,10 +762,11 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
         it++;
       }
     }
-    pfds.push_back(pollfd{listenSock, POLLIN}); // must be last entry 
-    int count = poll(&pfds[0], pfds.size(), -1);
+    pfds.push_back(pollfd{listenSock, POLLIN}); // must be last entry
+    int count = poll(&pfds[0], pfds.size(), -1); 
     if(count == -1 && (errno == EAGAIN || errno == EINTR)) continue;
     ENSURE(count != -1);
+    log->info("Monitoring {} sockets (one is the listening socket)", pfds.size());
     for(size_t idx=0; idx < pfds.size() && count > 0; ++idx) {
       auto curSock = pfds[idx].fd;
       auto revents = pfds[idx].revents;
@@ -742,8 +778,8 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
           socklen_t addrlen = sizeof(addr);
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
-          ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
-          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, handle, numCols, localRowIndices, localData));
+          ENSURE(fcntl(clientSock, F_SETFL, O_NONBLOCK) != -1);
+          std::unique_ptr<WorkerClientSendHandler> client(new WorkerClientSendHandler(clientSock, log, handle, numCols, localRowIndices, localData));
           clients.push_back(std::move(client));
         } else {
           ENSURE(clients[idx]->sock == curSock);
@@ -755,11 +791,12 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
   std::cerr << format("%s: finished sending rows\n") % world.rank();
 }
 
-void Worker::receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId> &layout) {
-  auto numPartsForMe = std::count(layout.begin(), layout.end(), this->id);
+void Worker::receiveMatrixBlocks(MatrixHandle handle) {
   std::vector<std::unique_ptr<WorkerClientReceiveHandler>> clients;
   std::vector<pollfd> pfds;
-  while(numPartsForMe > 0) {
+  uint64_t rowsLeft = matrices[handle].get()->LocalHeight(); 
+  while(rowsLeft > 0) {
+    log->info("{} rows remaining", rowsLeft);
     pfds.clear();
     for(auto it = clients.begin(); it != clients.end();) {
       const auto &client = *it;
@@ -786,16 +823,15 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle, const std::vector<WorkerId
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
           ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
-          std::unique_ptr<WorkerClientReceiveHandler> client(new WorkerClientReceiveHandler(clientSock, handle, matrices[handle].get()));
+          std::unique_ptr<WorkerClientReceiveHandler> client(new WorkerClientReceiveHandler(clientSock, log, handle, matrices[handle].get()));
           clients.push_back(std::move(client));
         } else {
           ENSURE(clients[idx]->sock == curSock);
-          numPartsForMe -= clients[idx]->handleEvent(revents);
+          rowsLeft -= clients[idx]->handleEvent(revents);
         }
       }
     }
   }
-  std::cerr << format("%s: finished receiving blocks\n") % world.rank();
 }
 
 int Worker::main() {
@@ -805,9 +841,9 @@ int Worker::main() {
 //  sinks.push_back(std::make_shared_ptr<spdlog::sinks::stdout_sink_st>()); // without ANSI color
   sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>()); // with ANSI color
   sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("rank-%d.log") % world.rank())));
-  log = std::make_shared<spdlog::logger>( str(format("worker-%d") % world.rank()), 
+  log = std::make_shared<spdlog::logger>( str(format("worker-%d") % world.rank()),
       std::begin(sinks), std::end(sinks));
-  log->flush_on(spdlog::level::warn);
+  log->flush_on(spdlog::level::info); // change to warn for production
   log->info("Started worker");
 
   // create listening socket, bind to an available port, and get the port number
@@ -815,7 +851,7 @@ int Worker::main() {
   sockaddr_in addr = {AF_INET};
   ENSURE(bind(listenSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0);
   ENSURE(listen(listenSock, 1024) == 0);
-  ENSURE(fcntl(listenSock, F_SETFD, O_NONBLOCK) != -1);
+  ENSURE(fcntl(listenSock, F_SETFL, O_NONBLOCK) != -1);
   socklen_t addrlen = sizeof(addr);
   ENSURE(getsockname(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen) == 0);
   ENSURE(addrlen == sizeof(addr));
@@ -826,6 +862,7 @@ int Worker::main() {
   ENSURE(gethostname(hostname, sizeof(hostname)) == 0);
   WorkerInfo info{hostname, port};
   world.send(0, 0, info);
+  log->info("Listening for a connection at {}:{}", hostname, port);
 
   // handle commands until done
   while(!shouldExit) {

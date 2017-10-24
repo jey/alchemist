@@ -29,7 +29,7 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     al.client.getIndexedRowMatrixStart(handle, full_layout)
     val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
       val worker = ctx.connectWorker(layout(idx))
-      val result  = rowindices.toList.map { rowIndex => 
+      val result  = rowindices.toList.map { rowIndex =>
         new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex, numCols))
       }.iterator
 //      worker.getIndexedRowMatrix_partitionComplete(handle)
@@ -41,7 +41,7 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     result.rows.count
     al.client.getIndexedRowMatrixFinish(handle)
     result
-  } 
+  }
 
 }
 
@@ -49,17 +49,32 @@ object AlMatrix {
   def apply(al: Alchemist, mat: IndexedRowMatrix): AlMatrix = {
     val ctx = al.context
     val workerIds = ctx.workerIds
-    val layout = mat.rows.partitions.zipWithIndex.map {
-      case (part, idx) => workerIds(idx % workerIds.length)
-    }.toArray
-    val handle = al.client.newMatrixStart(mat.numRows, mat.numCols, layout)
+    // rowWorkerAssignments is an array of WorkerIds whose ith entry is the world rank of the alchemist worker
+    // that will take the ith row (ranging from 0 to numworkers-1). Note 0 is an executor, not the driver
+    val (handle, rowWorkerAssignments) = al.client.newMatrixStart(mat.numRows, mat.numCols)
     mat.rows.mapPartitionsWithIndex { (idx, part) =>
-      val client = ctx.connectWorker(layout(idx))
-      part.foreach { row =>
-        client.newMatrix_addRow(handle, row.index, row.vector.toArray)
+      val rows = part.toArray
+      val relevantWorkers = rows.map(row => rowWorkerAssignments(row.index.toInt).id).distinct.map(id => new WorkerId(id))
+      val maxWorkerId = relevantWorkers.map(node => node.id).max
+      var nodeClients = Array.fill(maxWorkerId+1)(None: Option[WorkerClient])
+      System.err.println(s"Connecting to ${relevantWorkers.length} workers")
+      relevantWorkers.foreach(node => nodeClients(node.id) = Some(ctx.connectWorker(node)))
+      System.err.println(s"Successfully connected to all workers")
+
+      // TODO: randomize the order the rows are sent in to avoid queuing issues?
+      var count = 0
+      rows.foreach{ row =>
+        count += 1
+//        System.err.println(s"Sending row ${row.index.toInt}, ${count} of ${rows.length}")
+        nodeClients(rowWorkerAssignments(row.index.toInt).id).get.
+          newMatrix_addRow(handle, row.index, row.vector.toArray)
       }
-      client.newMatrix_partitionComplete(handle)
-      client.close()
+      System.err.println("Finished sending rows")
+      nodeClients.foreach(client => 
+          if (client.isDefined) {
+            client.get.newMatrix_partitionComplete(handle)
+            client.get.close()
+          })
       Iterator.single(true)
     }.count
     al.client.newMatrixFinish(handle)
