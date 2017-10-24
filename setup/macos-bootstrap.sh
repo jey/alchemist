@@ -29,6 +29,7 @@ if [ $WITH_PREREQS = 1 ]; then
   brew install gcc
   brew install make --with-default-names
   brew install cmake
+  brew install boost
   brew install boost-mpi
   brew install sbt
   brew install gmp

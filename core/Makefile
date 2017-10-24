@@ -8,19 +8,23 @@ TARGET_PATH = target
 # put libEl's CXXFLAGS in front so ours can override it
 CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
 #CXXFLAGS += -Wall
-CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -O1 -fext-numeric-literals
+CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -fext-numeric-literals
 CXXFLAGS += "-I$(ALPREFIX)/include"
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
-LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack -lboost_thread
+ifeq ($(shell uname), Darwin)
+LDFLAGS += -lboost_serialization-mt -lboost_mpi-mt -lboost_system-mt -larpack -lboost_thread-mt
+else
+LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack -lboost_thread 
+endif
 LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 
 # poor heuristic to check if on Cori, and fix a linkage issue that shouldn't be occurring
-ifeq ($(shell uname), "Linux")
-	LDFLAGS += -Wl,-rpath,/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/
+ifeq ($(shell uname), Linux)
+LDFLAGS += -Wl,-rpath,/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/
 endif
 
-ifeq ($(shell uname), "Darwin")
-  LDFLAGS += -lmpi
+ifeq ($(shell uname), Darwin)
+LDFLAGS += -lmpi
 endif
 
 # some environments (e.g. Cori) require this to find boost
