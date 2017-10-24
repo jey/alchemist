@@ -15,7 +15,7 @@ object BasicSuite {
     return System.currentTimeMillis();
   }
 
-  def main(args: Array[String]): Unit = {
+	def main(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("Alchemist Test")
     val sc = new SparkContext(conf)
 
