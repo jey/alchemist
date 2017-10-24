@@ -23,7 +23,7 @@ WITH_EIGEN=1
 WITH_SPDLOG=1
 
 # Check that the cmake toolchain file is where we expect
-[ -f $ALROOT/alchemist/cori/Cori-gnu.cmake ]
+[ -f $ALROOT/alchemist/setup/Cori-gnu.cmake ]
 
 # Setup
 module unload PrgEnv-intel
@@ -66,7 +66,7 @@ if [ "$WITH_EL" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/cori/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
@@ -86,7 +86,7 @@ if [ "$WITH_ARPACK" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/cori/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
@@ -106,7 +106,7 @@ if [ "$WITH_ARPACKPP" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/cori/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
@@ -125,7 +125,7 @@ if [ "$WITH_EIGEN" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/cori/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
@@ -145,7 +145,7 @@ if [ "$WITH_SPDLOG" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/cori/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
