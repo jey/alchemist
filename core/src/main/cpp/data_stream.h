@@ -58,6 +58,17 @@ struct DataInputStream {
     if(!is) throw IOError();
     return ntohd(val);
   }
+
+  std::string readString() {
+    uint64_t stringLen = readLong();
+    char * strin = new char [stringLen + 1];
+    is.read(strin, stringLen);
+    if(!is) throw IOError();
+    strin[stringLen]='\0';
+    std::string result = std::string(strin);
+    delete[] strin;
+    return result;
+  }
 };
 
 struct DataOutputStream {

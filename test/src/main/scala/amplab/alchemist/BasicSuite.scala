@@ -28,6 +28,9 @@ object BasicSuite {
     val al = new Alchemist(sc)
     System.err.println("test: done creating alchemist")
 
+    val dummyMat = al.readHDF5("test.hdf5", "rows")
+
+    /**
     // TEST: Alchemist matrix multiply
     var txStart = ticks()
     val alMatA = AlMatrix(al, sparkMatA)
@@ -52,6 +55,7 @@ object BasicSuite {
     val diff = norm(alResLocalMat.toDenseVector - sparkLocalMat.toDenseVector)
     println(s"The frobenius norm difference between Spark and Alchemist's results is ${diff}")
 
+    **/
     al.stop
     sc.stop
   }

@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #include <eigen3/Eigen/Dense>
 #include "spdlog/fmt/fmt.h"
+#include <H5Cpp.h>
 // #include "spdlog/fmt/ostr.h"
 #include "endian.h"
 
@@ -304,6 +305,27 @@ struct NewMatrixCommand : Command {
   }
 };
 
+struct ReadHDF5Command : Command {
+  std::string fname;
+  std::string varname;
+
+  explicit ReadHDF5Command() {
+  }
+
+  ReadHDF5Command(const std::string fname, const std::string varname) :
+    fname(fname), varname(varname) {
+  }
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive &ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & fname;
+    ar & varname;
+  }
+};
+
 int driverMain(const mpi::communicator &world, int argc, char *argv[]);
 int workerMain(const mpi::communicator &world, const mpi::communicator &peers);
 
@@ -383,5 +405,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::ThinSVDCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::TransposeCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::KMeansCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::TruncatedSVDCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::ReadHDF5Command);
 
 #endif

@@ -50,6 +50,13 @@ class DataOutputStream(ostream: OutputStream) extends JDataOutputStream(ostream)
     writeLong(buf.length * 8)
     buf.foreach(writeDouble)
   }
+
+  // NB: assumes the input is standard ASCII, could be UTF8 then weird stuff happens
+  // could use writeBytes member of JDataOutputStream
+  def writeString(str: String) : Unit = {
+    writeLong(str.length())
+    write(str.getBytes("US-ASCII"), 0, str.length())
+  }
 }
 
 class ProtocolError extends Exception {
@@ -209,6 +216,20 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     val VHandle = new MatrixHandle(input.readInt())
 
     return (UHandle, SHandle, VHandle)
+  }
+
+  def readHDF5(fname: String, varname: String) : MatrixHandle = {
+    output.writeInt(0x9)
+    output.writeString(fname)
+    output.writeString(varname)
+    output.flush()
+
+    if (input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+
+    val matHandle = new MatrixHandle(input.readInt())
+    return matHandle
   }
 
   def kMeans(mat: MatrixHandle, k : Int = 2, maxIters : Int = 20,
@@ -433,4 +454,8 @@ class Alchemist(val mysc: SparkContext) {
     (new AlMatrix(this, uHandle), new AlMatrix(this, sHandle), new AlMatrix(this, vHandle))
   }
 
+  def readHDF5(fname: String, varname: String) : AlMatrix = {
+    val matHandle = client.readHDF5(fname, varname)
+    new AlMatrix(this, matHandle)
+  }
 }

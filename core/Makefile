@@ -24,7 +24,9 @@ LDFLAGS += -Wl,-rpath,/opt/intel/compilers_and_libraries_2016.3.210/linux/compil
 endif
 
 ifeq ($(shell uname), Darwin)
-LDFLAGS += -lmpi
+HDF5_BASE = $(shell brew --prefix hdf5)
+LDFLAGS += "-L$(HDF5_BASE)/lib" -lmpi -lgfortran -lhdf5 -lhdf5_hl -lhdf5_hl_cpp -lhdf5_cpp
+CXXFLAGS += "-I$(HDF5_BASE)/include"
 endif
 
 # some environments (e.g. Cori) require this to find boost
