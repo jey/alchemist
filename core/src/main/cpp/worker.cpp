@@ -474,33 +474,6 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
   self->world.barrier();
 }
 
-// adapted from Skylark's ReadHDF5 function
-void ReadHDF5Command::run(Worker *self) const {
-	H5::H5File in(fname, H5F_ACC_RDONLY);
-
-	H5::DataSet dataset;
-  H5::DataSpace fs;
-  uint64_t m, n;
-	DistMatrix * matrix = new El::DistMatrix<double, El::MD, El::STAR>(0, 0, self->grid);
-
-  if (self->peers.rank() == 0) {
-    dataset = in.openDataSet(varname);
-    fs = dataset.getSpace();
-    hsize_t dims[2];
-    fs.getSimpleExtentDims(dims);
-    m = dims[0];
-    n = fs.getSimpleExtentNdims() > 1 ? dims[1] : 1;
-  }
-
-	mpi::broadcast(self->world, m, 1);
-	mpi::broadcast(self->world, n, 1);
-
-	self->world.barrier();
-	MatrixHandle handle;
-	mpi::broadcast(self->world, handle, 0);
-	ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
-}
-
 void NewMatrixCommand::run(Worker *self) const {
   auto handle = info.handle;
   DistMatrix *matrix = new El::DistMatrix<double, El::MD, El::STAR>(info.numRows, info.numCols, self->grid);

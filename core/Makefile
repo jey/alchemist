@@ -18,8 +18,9 @@ LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack -lboost_thr
 endif
 LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
 
-# poor heuristic to check if on Cori, and fix a linkage issue that shouldn't be occurring
+# poor heuristic to check if on Cori 
 ifeq ($(shell uname), Linux)
+#fix a linkage issue that shouldn't be occurring
 LDFLAGS += -Wl,-rpath,/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/ -L/opt/intel/compilers_and_libraries_2016.3.210/linux/compiler/lib/intel64_lin/ -lirc
 endif
 

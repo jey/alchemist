@@ -1,3 +1,7 @@
+This branch uses h5spark. The NERSC version is broken as of 11/2/2017, so I'm using [my fork](https://github.com/rustandruin/h5spark), which seems to work
+ still. You'll need to do an "sbt publish-local" so it is installed in your local Ivy repo on Cori, before 
+ doing an sbt package of Alchemist.
+
 Alchemist is a framework for easily and efficiently calling MPI-based codes from Apache Spark.
 
 ![Platonic Alchemist Architecture](https://github.com/alexgittens/alchemist/blob/master/architecture.png)

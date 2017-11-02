@@ -43,7 +43,6 @@ struct Driver {
   void handle_getTranspose();
   void handle_kmeansClustering();
   void handle_truncatedSVD();
-  void handle_readHDF5();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
@@ -141,10 +140,6 @@ int Driver::main() {
 
       case 0x8:
         handle_truncatedSVD();
-        break;
-
-      case 0x9:
-        handle_readHDF5();
         break;
 
       default:
@@ -497,32 +492,6 @@ void Driver::handle_getMatrixRows() {
   // wait for it to finish
   world.barrier();
   output.writeInt(0x1);
-  output.flush();
-}
-
-// TODO: handle exceptions!
-void Driver::handle_readHDF5() {
-  // read args
-  std::string fname = input.readString();
-  std::string varname = input.readString();
-
-  log->info("Attempting to read variable \"{}\" from file \"{}\"", varname, fname);
-  ReadHDF5Command cmd(fname, varname);
-
-  uint64_t m, n;
-
-  issue(cmd);
-	mpi::broadcast(world, m, 1);
-	mpi::broadcast(world, n, 1);
-  world.barrier();
-
-  MatrixHandle matHandle{nextMatrixId++};
-  MatrixDescriptor matInfo(matHandle, m, n);
-	mpi::broadcast(world, matHandle, 0);
-  ENSURE(matrices.insert(std::make_pair(matHandle, matInfo)).second);
-
-  output.writeInt(0x1); // success signal
-  output.writeInt(matHandle.id);
   output.flush();
 }
 
