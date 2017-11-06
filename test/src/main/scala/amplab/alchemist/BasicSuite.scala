@@ -17,7 +17,52 @@ object BasicSuite {
     return System.currentTimeMillis();
   }
 
-    def main(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit = {
+    args(0).toUpperCase match {
+        case "SVD" => testSVD(args.tail)
+        case "KMEANS" => testKMeans(args.tail)
+        case "MATMUL" => testMatMul(args.tail)
+    }
+  }
+
+    def testKMeans(args: Array[String]): Unit = {
+        val conf = new SparkConf().setAppName("Alchemist Kmeans Test")
+        val sc = new SparkContext(conf)
+
+        System.err.println("test: creating alchemist")
+        val al = new Alchemist(sc)
+        System.err.println("test: done creating alchemist")
+
+        var m = args(0).toInt
+        var n = args(1).toInt
+        var k = args(2).toInt
+        var maxIters = 100
+        var threshold = 1e-4
+        var partitions = if (args(3).toInt > 0) args(3).toInt else sc.defaultParallelism
+        System.err.println(s"using ${partitions} parallelism for the rdds") 
+
+        val rows = RandomRDDs.normalVectorRDD(sc, m, n, partitions);
+        rows.cache()
+        val rdd = new IndexedRowMatrix(rows.zipWithIndex.map(x => new IndexedRow(x._2, x._1)))
+
+        var txStart = ticks()
+        val alMatA = AlMatrix(al, rdd)
+        var txEnd = ticks()
+        var computeStart = txEnd
+        val (alCenters, alAssignments, numIters) = al.kMeans(alMatA, k, maxIters, threshold)
+        var computeEnd = ticks()
+        System.err.println(s"Alchemist timing: send=${(txEnd-txStart)/1000.0}, computeandreceive=${(computeEnd-computeStart)/1000.0}")
+
+        computeStart = ticks()
+        val clusters = KMeans.train(rows, k, maxIters, "kmeans||")
+        computeEnd = ticks()
+        System.err.println(s"Spark timing: svd= ${(computeEnd-computeStart)/1000.0}")
+
+        al.stop
+        sc.stop
+    }
+
+    def testSVD(args: Array[String]): Unit = {
         val conf = new SparkConf().setAppName("Alchemist SVD Test")
         val sc = new SparkContext(conf)
 
@@ -25,8 +70,94 @@ object BasicSuite {
         val al = new Alchemist(sc)
         System.err.println("test: done creating alchemist")
 
+        var m = args(0).toInt
+        var n = args(1).toInt
+        var k = args(2).toInt
+        var partitions = if (args(3).toInt > 0) args(3).toInt else sc.defaultParallelism
+        System.err.println(s"using ${partitions} parallelism for the rdds") 
+
+        val rows = RandomRDDs.normalVectorRDD(sc, m, n, partitions).zipWithIndex
+        val rdd = new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, x._1)))
+
+        var txStart = ticks()
+        val alMatA = AlMatrix(al, rdd)
+        var txEnd = ticks()
+        var computeStart = txEnd
+        val (alU, alS, alV) = al.truncatedSVD(alMatA, k) // returns sing vals in increas
+        var computeEnd = ticks()
+        var rcStart = ticks()
+        val alUreturned = alU.getIndexedRowMatrix()
+        val alSreturned = alS.getIndexedRowMatrix()
+        val alVreturned = alV.getIndexedRowMatrix()
+        var rcEnd = ticks()
+        System.err.println(s"Alchemist timing: send=${(txEnd-txStart)/1000.0}, svd=${(computeEnd-computeStart)/1000.0}, receive=${(rcEnd - rcStart)/1000.0}")
+
+        computeStart = ticks()
+        val svd = rdd.computeSVD(k, computeU = true) 
+        svd.U.rows.count()
+        computeEnd = ticks()
+        System.err.println(s"Spark timing: svd= ${(computeEnd-computeStart)/1000.0}")
+
+        al.stop
+        sc.stop
+    }
+
+    def testMatMul(args: Array[String]): Unit = {
+        val conf = new SparkConf().setAppName("Alchemist MatMul Test")
+        val sc = new SparkContext(conf)
+
+        System.err.println("test: creating alchemist")
+        val al = new Alchemist(sc)
+        System.err.println("test: done creating alchemist")
+
+        // multiply m-by-n and n-by-k
+        val m = args(0).toInt
+        val n = args(1).toInt
+        val k = args(2).toInt
+        val partitions = args(3).toInt
+
+        val rowsA = RandomRDDs.normalVectorRDD(sc, m, n, partitions).zipWithIndex
+        val sparkMatA = new IndexedRowMatrix(rowsA.map(x => new IndexedRow(x._2, x._1)))
+        val rowsB = RandomRDDs.normalVectorRDD(sc, n, k, partitions).zipWithIndex
+        val sparkMatB = new IndexedRowMatrix(rowsB.map(x => new IndexedRow(x._2, x._1)))
+
+        var txStart = ticks()
+        val alMatA = AlMatrix(al, sparkMatA)
+        val alMatB = AlMatrix(al, sparkMatB)
+        var txEnd = ticks()
+        var computeStart = txEnd
+        val alMatC = al.matMul(alMatA, alMatB)
+        var computeEnd = ticks()
+        var rcStart = ticks()
+        val alRes = alMatC.getIndexedRowMatrix()
+        var rcEnd = ticks()
+        System.err.println(s"Alchemist timing: send=${(txEnd-txStart)/1000.0}, mul=${(computeEnd-computeStart)/1000.0}, receive=${(rcEnd - rcStart)/1000.0}")
+
+        // // Spark matrix multiply
+        val smulStart = ticks()
+        val sparkMatC = sparkMatA.toBlockMatrix(sparkMatA.numRows.toInt, sparkMatA.numCols.toInt).
+                      multiply(sparkMatB.toBlockMatrix(sparkMatB.numRows.toInt, sparkMatB.numCols.toInt)).toIndexedRowMatrix
+        val smulEnd = ticks()
+        System.err.println(s"Spark matrix multiplication time(s): ${(smulEnd - smulStart)/1000.0}")
+
+        al.stop
+        sc.stop
+    }
+
+    def testSVDHDF5(args: Array[String]): Unit = {
+        val conf = new SparkConf().setAppName("Alchemist SVD Test")
+        val sc = new SparkContext(conf)
+
+        System.err.println("test: creating alchemist")
+        val al = new Alchemist(sc)
+        System.err.println("test: done creating alchemist")
+
+        var fname = args(0)
+        var varname = args(1)
+        var partitions = args(2).toInt
         var logger = LoggerFactory.getLogger(getClass)
-        val bigrdd = read.h5read_imat(sc, "file:///global/cscratch1/sd/gittens/large-datasets/ocean.h5", "rows", 30)
+        System.err.println("reading in hdf5 file")
+        val bigrdd = read.h5read_imat(sc, fname, varname, partitions)
         val rdd = new IndexedRowMatrix(bigrdd.rows.sample(false, 0.01))
         rdd.rows.cache()
         val count = rdd.rows.count()

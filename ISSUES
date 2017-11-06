@@ -1,0 +1,5 @@
+- hangs sometimes when transferring matrices
+- std::array invalid array size error when matrix being sent is too large
+- the alchemist workers should use multiple cores (elemental should of course, too)
+- allow starting fewer mpi workers than spark
+- support restarting alchemist cleanly within the same allocation

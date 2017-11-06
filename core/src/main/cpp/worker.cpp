@@ -339,7 +339,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
     }
   MatrixXd gramMat = localData.transpose()*localData;
   std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
-  std::cerr << self->world.rank() << ": Took " << fillLocalMat_duration.count() <<"ms to compute local contribution to A'*A\n";
+  //std::cerr << self->world.rank() << ": Took " << fillLocalMat_duration.count() <<"ms to compute local contribution to A'*A\n";
 
   uint32_t command;
   std::unique_ptr<double[]> vecIn{new double[n]};
@@ -355,7 +355,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       Eigen::Map<VectorXd> x(vecIn.get(), n);
       VectorXd y = gramMat * x;
       std::chrono::duration<double, std::milli> elapsed_msMvProd(std::chrono::system_clock::now() - startMvProd);
-      std::cerr << self->world.rank() << ": Took " << elapsed_msMvProd.count() << "ms to multiply A'*A*x\n";
+      //std::cerr << self->world.rank() << ": Took " << elapsed_msMvProd.count() << "ms to multiply A'*A*x\n";
 
       mpi::reduce(self->world, y.data(), n, std::plus<double>(), 0);
     }
@@ -664,7 +664,7 @@ struct WorkerClientReceiveHandler {
 
   void close() {
     if(sock != -1) ::close(sock);
-    log->warn("Closed socket");
+    //log->warn("Closed socket");
     sock = -1;
     pollEvents = 0;
   }
@@ -674,7 +674,7 @@ struct WorkerClientReceiveHandler {
     int rowsCompleted = 0;
     if(revents & POLLIN && pollEvents & POLLIN) {
       while(!isClosed()) {
-        log->info("waiting on socket");
+        //log->info("waiting on socket");
         int count = recv(sock, &inbuf[pos], inbuf.size() - pos, 0);
         log->info("count of received bytes {}", count);
         if(count == 0) {
@@ -716,7 +716,7 @@ struct WorkerClientReceiveHandler {
               ENSURE(htobe64(*(uint64_t*)dataPtr) == numCols * 8);
               dataPtr += 8;
               auto localRowIdx = matrix->LocalRow(rowIdx);
-              log->info("Received row {} of matrix {}, writing to local row {}", rowIdx, handle.id, localRowIdx);
+              //log->info("Received row {} of matrix {}, writing to local row {}", rowIdx, handle.id, localRowIdx);
               for (size_t colIdx = 0; colIdx < numCols; ++colIdx) {
                 double value = ntohd(*(uint64_t*)dataPtr);
                 matrix->SetLocal(localRowIdx, matrix->LocalCol(colIdx), value); //LocalCal call should be unnecessary
@@ -727,7 +727,7 @@ struct WorkerClientReceiveHandler {
               rowsCompleted++;
               pos = 0;
             } else if(typeCode == 0x2) {
-              log->info("All the rows coming to me from one Spark executor have been received");
+              //log->info("All the rows coming to me from one Spark executor have been received");
               /**struct sockaddr_storage addr;
               socklen_t len;
               char peername[255];
@@ -766,7 +766,7 @@ void Worker::sendMatrixRows(MatrixHandle handle, size_t numCols, const std::vect
     int count = poll(&pfds[0], pfds.size(), -1); 
     if(count == -1 && (errno == EAGAIN || errno == EINTR)) continue;
     ENSURE(count != -1);
-    log->info("Monitoring {} sockets (one is the listening socket)", pfds.size());
+    //log->info("Monitoring {} sockets (one is the listening socket)", pfds.size());
     for(size_t idx=0; idx < pfds.size() && count > 0; ++idx) {
       auto curSock = pfds[idx].fd;
       auto revents = pfds[idx].revents;
@@ -796,7 +796,7 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
   std::vector<pollfd> pfds;
   uint64_t rowsLeft = matrices[handle].get()->LocalHeight(); 
   while(rowsLeft > 0) {
-    log->info("{} rows remaining", rowsLeft);
+    //log->info("{} rows remaining", rowsLeft);
     pfds.clear();
     for(auto it = clients.begin(); it != clients.end();) {
       const auto &client = *it;
@@ -808,9 +808,11 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
       }
     }
     pfds.push_back(pollfd{listenSock, POLLIN});  // must be last entry
+    //log->info("Pushed active clients to the polling list and added listening socket");
     int count = poll(&pfds[0], pfds.size(), -1);
     if(count == -1 && (errno == EAGAIN || errno == EINTR)) continue;
     ENSURE(count != -1);
+    //log->info("Polled, now handling events");
     for(size_t idx = 0; idx < pfds.size() && count > 0; ++idx) {
       auto curSock = pfds[idx].fd;
       auto revents = pfds[idx].revents;
@@ -825,8 +827,10 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
           ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
           std::unique_ptr<WorkerClientReceiveHandler> client(new WorkerClientReceiveHandler(clientSock, log, handle, matrices[handle].get()));
           clients.push_back(std::move(client));
+          //log->info("Added new client");
         } else {
           ENSURE(clients[idx]->sock == curSock);
+          log->info("Handling a client's events");
           rowsLeft -= clients[idx]->handleEvent(revents);
         }
       }

@@ -520,13 +520,14 @@ void Driver::handle_newMatrix() {
       rowWorkerAssignments[rowIdx] = workerIdx;
     }
   }
+
   log->info("Sending list of which worker each row should go to");
   output.writeInt(0x1); // statusCode
   for(auto workerIdx: rowWorkerAssignments)
     output.writeInt(workerIdx);
   output.flush();
 
-  // wait for spark to finish sending the data over to the alchemist executors ...
+  log->info("Waiting for spark to finish sending data to the workers");
   world.barrier();
   output.writeInt(0x1);  // statusCode
   output.flush();
