@@ -8,7 +8,7 @@ TARGET_PATH = target
 # put libEl's CXXFLAGS in front so ours can override it
 CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
 #CXXFLAGS += -Wall
-CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -fext-numeric-literals
+CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -fext-numeric-literals -fopenmp
 CXXFLAGS += "-I$(ALPREFIX)/include"
 LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)
 ifeq ($(shell uname), Darwin)
