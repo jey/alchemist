@@ -317,18 +317,23 @@ void TruncatedSVDCommand::run(Worker *self) const {
   if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
     workingMat = A;
   } else {
-    std::cerr << self->world.rank() << ": detected matrix is not row-partitioned, so relayout-ing to row-partitioned";
+    self->log->info("detected matrix is not row-partitioned, so relayout-ing to row-partitioned");
     workingMat = dataMat_uniqptr.get();
     auto relayoutStart = std::chrono::system_clock::now();
     El::Copy(*A, *workingMat); // relayouts data so it is row-wise partitioned
     std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - relayoutStart);
-    std::cerr << self->world.rank() << ": relayout took " << relayoutDuration.count() << "ms\n";
+    self->log->info("relayout took {} ms", relayoutDuration.count());
   }
 
   // Retrieve your local block of rows and compute local contribution to A'*A
   MatrixXd localData(workingMat->LocalHeight(), n);
 
+  self->log->info("Computing the local contribution to A'*A");
   auto startFillLocalMat = std::chrono::system_clock::now();
+
+  // may be SUPERSLOW? use LockedBuffers for local manipulations?
+  /*
+  self->log->info("Computing local contribution to the Gramian matrix");
   std::vector<El::Int> rowMap(localData.rows());
   for(El::Int rowIdx = 0; rowIdx < m; ++rowIdx)
     if (workingMat->IsLocalRow(rowIdx)) {
@@ -337,14 +342,26 @@ void TruncatedSVDCommand::run(Worker *self) const {
       for(El::Int colIdx = 0; colIdx < n; ++colIdx)
         localData(localRowIdx, colIdx) = workingMat->GetLocal(localRowIdx, colIdx);
     }
+    */
+
+  // Need to double-check is doing the right thing
+  self->log->info("Extracting the local rows");
+  const El::Matrix<double> &localMat = workingMat->LockedMatrix();
+  const double * localChunk = localMat.LockedBuffer();
+  for(El::Int rowIdx = 0; rowIdx < localMat.Height(); ++rowIdx) 
+      for(El::Int colIdx = 0; colIdx < n; ++colIdx)
+          localData(rowIdx, colIdx) = localChunk[colIdx * localMat.LDim() + rowIdx];
+  self->log->info("Done extracting the local rows, now computing the local Gramian");
+  self->log->info("Using {} threads", Eigen::nbThreads());
+
   MatrixXd gramMat = localData.transpose()*localData;
   std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
-  //std::cerr << self->world.rank() << ": Took " << fillLocalMat_duration.count() <<"ms to compute local contribution to A'*A\n";
+  self->log->info("Took {} ms to compute local contribution to A'*A", fillLocalMat_duration.count());
 
   uint32_t command;
   std::unique_ptr<double[]> vecIn{new double[n]};
 
-  std::cerr << format("%s: finished inits \n") % self->world.rank();
+  self->log->info("finished initialization for truncated SVD");
 
   while(true) {
     mpi::broadcast(self->world, command, 0);
@@ -476,11 +493,15 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 
 void NewMatrixCommand::run(Worker *self) const {
   auto handle = info.handle;
+  self->log->info("Creating new distributed matrix");
   DistMatrix *matrix = new El::DistMatrix<double, El::MD, El::STAR>(info.numRows, info.numCols, self->grid);
   Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
+  self->log->info("Created new distributed matrix");
 
   std::vector<uint64_t> rowsOnWorker;
+  self->log->info("Creating vector of local rows");
+  rowsOnWorker.reserve(info.numRows);
   for(El::Int rowIdx = 0; rowIdx < info.numRows; ++rowIdx)
     if (matrix->IsLocalRow(rowIdx)) 
       rowsOnWorker.push_back(rowIdx);
@@ -676,19 +697,19 @@ struct WorkerClientReceiveHandler {
       while(!isClosed()) {
         //log->info("waiting on socket");
         int count = recv(sock, &inbuf[pos], inbuf.size() - pos, 0);
-        log->info("count of received bytes {}", count);
+        //log->info("count of received bytes {}", count);
         if(count == 0) {
           break;
         } else if(count == -1) {
           if(errno == EAGAIN) {
             // no more input available until next POLLIN
-            log->warn("EAGAIN encountered");
+            //log->warn("EAGAIN encountered");
             break;
           } else if(errno == EINTR) {
-            log->warn("Connection interrupted");
+            //log->warn("Connection interrupted");
             continue;
           } else if(errno == ECONNRESET) {
-            log->warn("Connection reset");
+            //log->warn("Connection reset");
             close();
             break;
           } else {
@@ -723,7 +744,7 @@ struct WorkerClientReceiveHandler {
                 dataPtr += 8;
               }
               ENSURE(dataPtr == &inbuf[inbuf.size()]);
-              log->info("Successfully received row {} of matrix {}", rowIdx, handle.id);
+              //log->info("Successfully received row {} of matrix {}", rowIdx, handle.id);
               rowsCompleted++;
               pos = 0;
             } else if(typeCode == 0x2) {
@@ -742,6 +763,7 @@ struct WorkerClientReceiveHandler {
         }
       }
     }
+    //log->info("returning from handling events");
     return rowsCompleted;
   }
 };
@@ -824,13 +846,13 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
           socklen_t addrlen = sizeof(addr);
           int clientSock = accept(listenSock, reinterpret_cast<sockaddr*>(&addr), &addrlen);
           ENSURE(addrlen == sizeof(addr));
-          ENSURE(fcntl(clientSock, F_SETFD, O_NONBLOCK) != -1);
+          ENSURE(fcntl(clientSock, F_SETFL, O_NONBLOCK) != -1);
           std::unique_ptr<WorkerClientReceiveHandler> client(new WorkerClientReceiveHandler(clientSock, log, handle, matrices[handle].get()));
           clients.push_back(std::move(client));
           //log->info("Added new client");
         } else {
           ENSURE(clients[idx]->sock == curSock);
-          log->info("Handling a client's events");
+          //log->info("Handling a client's events");
           rowsLeft -= clients[idx]->handleEvent(revents);
         }
       }
@@ -849,6 +871,7 @@ int Worker::main() {
       std::begin(sinks), std::end(sinks));
   log->flush_on(spdlog::level::info); // change to warn for production
   log->info("Started worker");
+  log->info("Max number of OpenMP threads: {}", omp_get_max_threads());
 
   // create listening socket, bind to an available port, and get the port number
   ENSURE((listenSock = socket(AF_INET, SOCK_STREAM, 0)) != -1);

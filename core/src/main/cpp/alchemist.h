@@ -1,6 +1,7 @@
 #ifndef ALCHEMIST__ALCHEMIST_H
 #define ALCHEMIST__ALCHEMIST_H
 
+#include <omp.h>
 #include <El.hpp>
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/vector.hpp>

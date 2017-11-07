@@ -16,7 +16,7 @@ LDFLAGS += -lboost_serialization-mt -lboost_mpi-mt -lboost_system-mt -larpack -l
 else
 LDFLAGS += -lboost_serialization -lboost_mpi -lboost_system -larpack -lboost_thread 
 endif
-LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib
+LDFLAGS += -Wl,-rpath,$(ALPREFIX)/lib -fopenmp
 
 # poor heuristic to check if on Cori 
 ifeq ($(shell uname), Linux)

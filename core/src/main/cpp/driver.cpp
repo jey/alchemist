@@ -372,6 +372,9 @@ void Driver::handle_truncatedSVD() {
   while (!prob.ArnoldiBasisFound()) {
     prob.TakeStep();
     ++iterNum;
+    if(iterNum % 20 == 0) {
+        log->info("Computed {} mv products", iterNum);
+    }
     if (prob.GetIdo() == 1 || prob.GetIdo() == -1) {
       command = 1;
       mpi::broadcast(world, command, 0);
@@ -406,6 +409,7 @@ void Driver::handle_truncatedSVD() {
   ENSURE(matrices.insert(std::make_pair(VHandle, Vinfo)).second);
 
   world.barrier();
+  log->info("Writing ok status followed by U,S,V handles");
   output.writeInt(0x1);
   output.writeInt(UHandle.id);
   output.writeInt(SHandle.id);
@@ -551,6 +555,7 @@ int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
   //log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
   log->flush_on(spdlog::level::info); // flush always, for debugging
   log->info("Started Driver");
+  log->info("Max number of OpenMP threads: {}", omp_get_max_threads());
 
   char machine[255];
   char port[255];

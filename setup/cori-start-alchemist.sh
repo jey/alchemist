@@ -1,8 +1,15 @@
-# assumes there are an even number of nodes launched
-# to be run once you have launched a batch/interactive job on Cori:
-# loads the spark module and splits the nodes between Alchemist and Spark evenly,
-# loads needed modules to run/compile Alchemist, and sets appropriate paths and variables
-# to run/compile Alchemist
+# This script is for running Alchemist on a Cori allocation
+# It loads the spark module and splits the nodes between Alchemist and Spark 
+# It is to be run immediately after you have launched a batch/interactive job on Cori
+# It also loads the modules needed to run/compile Alchemist and sets the appropriate paths and variables
+# (just in case you need to compile during an allocation)
+#
+# the first argument is the number of nodes to assign to Alchemist: it should be at least two (for a driver and one worker)
+# the second argument decides how many cores per alchemist worker (and driver), and therefore how many alchemist workers per node
+#
+# Example use: launch 15 Spark nodes (14 executors) and 5*(32/16) - 1 = 9 Alchemist workers (on 5 nodes)
+# salloc -N 20 -t 15 --qos=interactive -C haswell
+# source setup/cori-start-alchemist.sh 5 16
 
 ###############################################
 ##### Setup building environment ##############
@@ -36,25 +43,24 @@ export FC="ftn"
 ##### Start Spark and Alchemist  ##############
 ###############################################
 
+# slaves is automatrically generated when the spark module is loaded, and contains 
+# the machines on which the spark executors will run (so one less than the number of machines allocated in this Cori batch job)
+# split this into two machine files: one for Spark, one for Alchemist
+
 module load spark/2.1.0
+
+ALCHEMISTNODECOUNT=$1 
 [[ $SPARKURL =~ spark://(.*):(.*) ]]
 export SPARK_MASTER_NODE=${BASH_REMATCH[1]}
-
-pushd /tmp
-HALFLINECOUNT=$((`wc -l $SPARK_WORKER_DIR/slaves | cut -f 1 -d' '`/2))
-# slaves is automatrically generated when the spark module is loaded, and contains 
-# the machines on which spark will run (so the machines allocated in this Cori batch job)
-# note slaves has an odd number of lines (because it does not include the spark master node)
-# one of these will be the alchemist master, and the remainder are split evenly over spark and alchemist as executors
-# bash rounds down so 3/2=1
 mv $SPARK_WORKER_DIR/slaves $SPARK_WORKER_DIR/slaves.original
-cat $SPARK_WORKER_DIR/slaves.original | sed -n "$((${HALFLINECOUNT}+1)),\$p" > $SPARK_WORKER_DIR/hosts.alchemist
-cat $SPARK_WORKER_DIR/slaves.original | sed -n "1,${HALFLINECOUNT}p" > $SPARK_WORKER_DIR/slaves
-popd
-# start spark on half the nodes
-start-all.sh
-# start alchemist on the other half (can't do this from spark driver b/c it needs to be run from the mom node)
-# NB: SRUN NEEDS AN ABSOLUTE PATH TO THE EXECUTABLE
-NUMALPROCS=`wc -l $SPARK_WORKER_DIR/hosts.alchemist | cut -f 1 -d' '`
-srun -N $NUMALPROCS -n $NUMALPROCS -w $SPARK_WORKER_DIR/hosts.alchemist ./core/target/alchemist &
+cat $SPARK_WORKER_DIR/slaves.original | sed -n "1,${ALCHEMISTNODECOUNT}p" > $SPARK_WORKER_DIR/hosts.alchemist
+cat $SPARK_WORKER_DIR/slaves.original | sed -n "$((${ALCHEMISTNODECOUNT}+1)),\$p" > $SPARK_WORKER_DIR/slaves
 
+# start spark 
+start-all.sh
+
+# apparently has to be done *AFTER* spark launches, or spark workers won't launch?
+# start alchemist (can't do this from spark driver as would on a laptop, b/c it needs to be run from the mom node)
+# BE CAREFUL: SRUN NEEDS AN ABSOLUTE PATH TO THE EXECUTABLE
+export OMP_NUM_THREADS=$2
+srun -N ${ALCHEMISTNODECOUNT} -n $((${ALCHEMISTNODECOUNT}*32/${OMP_NUM_THREADS})) --cpus-per-task=${OMP_NUM_THREADS} -w $SPARK_WORKER_DIR/hosts.alchemist ./core/target/alchemist &
