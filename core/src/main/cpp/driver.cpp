@@ -386,20 +386,26 @@ void Driver::handle_truncatedSVD() {
   prob.FindEigenvectors();
   uint32_t nconv = prob.ConvergedEigenvalues();
   uint32_t niters = prob.GetIter();
-  log->info("Done after {} Arnoldi iterations", niters);
+  log->info("Done after {} Arnoldi iterations, converged to {} eigenvectors of size {}", niters, nconv, n);
 
+  //NB: it may be the case that n*nconv > 4 GB, then have to be careful!
   // assuming tall and skinny A for now
   MatrixXd rightVecs(n, nconv);
+  log->info("Allocated matrix for right eivenvectors of A'*A");
   // Eigen uses column-major layout by default!
   for(uint32_t idx = 0; idx < nconv; idx++)
     std::memcpy(rightVecs.col(idx).data(), prob.RawEigenvector(idx), n*sizeof(double));
+  log->info("Copied right eigenvectors into allocated storage");
 
   // Populate U, V, S
   command = 2;
   mpi::broadcast(world, command, 0);
   mpi::broadcast(world, nconv, 0);
+  log->info("Broadcasted command and number of converged eigenvectors");
   mpi::broadcast(world, rightVecs.data(), n*nconv, 0);
+  log->info("Broadcasted right eigenvectors"); 
   mpi::broadcast(world, prob.RawEigenvalues(), nconv, 0);
+  log->info("Broadcasted eigenvalues");
 
   MatrixDescriptor Uinfo(UHandle, m, nconv);
   MatrixDescriptor Sinfo(SHandle, nconv, 1);

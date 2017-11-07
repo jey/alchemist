@@ -30,9 +30,11 @@ module unload darshan
 source setup/cori-start-alchemist.sh 8 2
 
 method=SVD
-m=5000000
+# 2.5M by 10K double matrix is 200 GB
+m=2500000
 n=10000
-k=100
+k=20
+# seems like if the partitions are too large, Spark will hang, so go for 2GB/partition
 partitions=200
 
 spark-submit --verbose\

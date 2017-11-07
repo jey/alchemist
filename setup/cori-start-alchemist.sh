@@ -55,6 +55,7 @@ export SPARK_MASTER_NODE=${BASH_REMATCH[1]}
 mv $SPARK_WORKER_DIR/slaves $SPARK_WORKER_DIR/slaves.original
 cat $SPARK_WORKER_DIR/slaves.original | sed -n "1,${ALCHEMISTNODECOUNT}p" > $SPARK_WORKER_DIR/hosts.alchemist
 cat $SPARK_WORKER_DIR/slaves.original | sed -n "$((${ALCHEMISTNODECOUNT}+1)),\$p" > $SPARK_WORKER_DIR/slaves
+mkdir -p $SPARK_WORKER_DIR/alchemistIOs
 
 # start spark 
 start-all.sh
@@ -63,4 +64,10 @@ start-all.sh
 # start alchemist (can't do this from spark driver as would on a laptop, b/c it needs to be run from the mom node)
 # BE CAREFUL: SRUN NEEDS AN ABSOLUTE PATH TO THE EXECUTABLE
 export OMP_NUM_THREADS=$2
-srun -N ${ALCHEMISTNODECOUNT} -n $((${ALCHEMISTNODECOUNT}*32/${OMP_NUM_THREADS})) --cpus-per-task=${OMP_NUM_THREADS} -w $SPARK_WORKER_DIR/hosts.alchemist ./core/target/alchemist &
+srun -N ${ALCHEMISTNODECOUNT}\
+     -n $((${ALCHEMISTNODECOUNT}*32/${OMP_NUM_THREADS}))\
+     --cpus-per-task=${OMP_NUM_THREADS}\
+     -w $SPARK_WORKER_DIR/hosts.alchemist\
+     --output=$SPARK_WORKER_DIR/alchemistIOs/stdout_%t.log\
+     --error=$SPARK_WORKER_DIR/alchemistIOs/stderr_%t.log\
+     ./core/target/alchemist &

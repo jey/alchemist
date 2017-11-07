@@ -317,7 +317,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
   if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
     workingMat = A;
   } else {
-    self->log->info("detected matrix is not row-partitioned, so relayout-ing to row-partitioned");
+    self->log->info("detected matrix is not row-partitioned, so relayout-ing a copy to row-partitioned");
     workingMat = dataMat_uniqptr.get();
     auto relayoutStart = std::chrono::system_clock::now();
     El::Copy(*A, *workingMat); // relayouts data so it is row-wise partitioned
@@ -352,8 +352,12 @@ void TruncatedSVDCommand::run(Worker *self) const {
       for(El::Int colIdx = 0; colIdx < n; ++colIdx)
           localData(rowIdx, colIdx) = localChunk[colIdx * localMat.LDim() + rowIdx];
   self->log->info("Done extracting the local rows, now computing the local Gramian");
-  self->log->info("Using {} threads", Eigen::nbThreads());
+  //self->log->info("Using {} threads", Eigen::nbThreads());
 
+  //NB: sometimes it makes sense to precompute the gramMat (when it's cheap (we have a lot of cores and enough memory), sometimes
+  // it makes more sense to compute A'*(A*x) separately each time (when we don't have enough memory for gramMat, or its too expensive
+  // time-wise to precompute GramMat). trade-off depends on k (through the number of Arnoldi iterations we'll end up needing), the
+  // amount of memory we have free to store GramMat, and the number of cores we have available
   MatrixXd gramMat = localData.transpose()*localData;
   std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
   self->log->info("Took {} ms to compute local contribution to A'*A", fillLocalMat_duration.count());
@@ -368,9 +372,10 @@ void TruncatedSVDCommand::run(Worker *self) const {
     if (command == 1) {
       mpi::broadcast(self->world, vecIn.get(), n, 0);
 
-      auto startMvProd = std::chrono::system_clock::now();
       Eigen::Map<VectorXd> x(vecIn.get(), n);
+      auto startMvProd = std::chrono::system_clock::now();
       VectorXd y = gramMat * x;
+      //VectorXd y = localData.transpose()* (localData*x);
       std::chrono::duration<double, std::milli> elapsed_msMvProd(std::chrono::system_clock::now() - startMvProd);
       //std::cerr << self->world.rank() << ": Took " << elapsed_msMvProd.count() << "ms to multiply A'*A*x\n";
 
