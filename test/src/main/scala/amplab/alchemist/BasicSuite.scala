@@ -1,6 +1,4 @@
 package amplab.alchemist
-//import org.scalatest.FunSuite
-import org.nersc.io._
 import org.slf4j.LoggerFactory
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.linalg.{DenseMatrix, DenseVector, SingularValueDecomposition, Matrix}
@@ -142,48 +140,6 @@ object BasicSuite {
 
         al.stop
         sc.stop
-    }
-
-    def testSVDHDF5(args: Array[String]): Unit = {
-        val conf = new SparkConf().setAppName("Alchemist SVD Test")
-        val sc = new SparkContext(conf)
-
-        System.err.println("test: creating alchemist")
-        val al = new Alchemist(sc)
-        System.err.println("test: done creating alchemist")
-
-        var fname = args(0)
-        var varname = args(1)
-        var partitions = args(2).toInt
-        var logger = LoggerFactory.getLogger(getClass)
-        System.err.println("reading in hdf5 file")
-        val bigrdd = read.h5read_imat(sc, fname, varname, partitions)
-        val rdd = new IndexedRowMatrix(bigrdd.rows.sample(false, 0.01))
-        rdd.rows.cache()
-        val count = rdd.rows.count()
-        logger.info("\nRDD_count: "+count+", Total number of rows in this experiment\n")
-
-        var txStart = ticks()
-        val alMatA = AlMatrix(al, rdd)
-        var txEnd = ticks()
-        var computeStart = txEnd
-        val k : Int = 10;
-        val (alU, alS, alV) = al.truncatedSVD(alMatA, k) // returns sing vals in increas
-        var computeEnd = ticks()
-        var rcStart = ticks()
-        val alUreturned = alU.getIndexedRowMatrix()
-        val alSreturned = alS.getIndexedRowMatrix()
-        val alVreturned = alV.getIndexedRowMatrix()
-        var rcEnd = ticks()
-        logger.info(s"Alchemist timing: send=${(txEnd-txStart)/1000.0}, mul=${(computeEnd-computeStart)/1000.0}, receive=${(rcEnd - rcStart)/1000.0}")
-
-        computeStart = ticks()
-        val svd = rdd.computeSVD(k, computeU = true) 
-        svd.U.rows.count()
-        computeEnd = ticks()
-        logger.info(s"Spark timing: svd= ${(computeEnd-computeStart)/1000.0}")
-
-        sc.stop()
     }
 
 /*

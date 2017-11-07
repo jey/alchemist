@@ -17,7 +17,6 @@ lazy val commonSettings = Seq(
   libraryDependencies += "org.apache.spark" %% "spark-core" % "2.1.0" % "provided",
   libraryDependencies += "org.apache.spark" %% "spark-mllib" % "2.1.0" % "provided",
   libraryDependencies += "org.apache.spark" %% "spark-core" % "2.1.0" % "provided", 
-  libraryDependencies += "org.nersc" %% "h5spark" % "1.0",
   test in assembly := {}
 )
 
@@ -37,4 +36,3 @@ lazy val tests = (project in file("test")).
     mainClass in assembly := Some("amplab.alchemist.BasicSuite")
   ).
   dependsOn(core)
-

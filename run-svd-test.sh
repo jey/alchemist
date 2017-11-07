@@ -31,14 +31,14 @@ source setup/cori-start-alchemist.sh 8 2
 
 method=SVD
 # 2.5M by 10K double matrix is 200 GB
-m=2500000
+#m=2500000
+m=312500
 n=10000
 k=20
 # seems like if the partitions are too large, Spark will hang, so go for 2GB/partition
 partitions=200
 
 spark-submit --verbose\
-  --jars /global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/fits.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jarfitsobj.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jarh4obj.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jarh5obj.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jarhdf-2.11.0.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jarhdf5-2.11.0.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jarhdfobj.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jarnc2obj.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/jhdfview.jar,/global/cscratch1/sd/gittens/alchemistSHELL/alchemist/lib/netcdfAll-4.6.5.jar\
   --driver-memory 115g\
   --executor-memory 115g\
   --executor-cores 32 \
