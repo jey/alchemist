@@ -1,12 +1,11 @@
-NB: make sure you're using the "cori-version" branch when trying to run Alchemist on Cori
-
 # To run Alchemist on Cori
 ```
 # launch in interactive mode w/ e.g.
-# salloc -N 6 -t 30 -C haswell --qos=interactive -L SCRATCH
-# to get 3 Spark nodes (1 driver, 2 exec) and 3 Alchemist nodes (1 driver, 2 exec)
+# salloc -N 7 -t 30 -C haswell --qos=interactive -L SCRATCH
 cd $SCRATCH/alchemistSHELL/alchemist # or wherever you installed alchemist as instructed below
-source setup/cori-start-alchemist.sh # will split nodes between Spark and Alchemist, and start Alchemist in background
+# this will allocate 3 nodes for alchemist processes, and each alchemist process will be given 2 cores; 
+# the remaining 4 nodes will run Spark; see the script for more details
+source setup/cori-start-alchemist.sh 3 2
 make check # will run the current test suite
 ```
 
