@@ -1,6 +1,7 @@
 package amplab.alchemist
 import org.apache.spark.mllib.linalg.distributed.{IndexedRow, IndexedRowMatrix}
 import scala.math.max
+import java.nio.ByteBuffer
 
 class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
   def getDimensions() : Tuple2[Long, Int] = {
@@ -62,11 +63,13 @@ object AlMatrix {
 
       // TODO: randomize the order the rows are sent in to avoid queuing issues?
       var count = 0
+      val buflen = 4 + 4 + 8 + 8 + 8 * rows(0).vector.toArray.length
+      val reuseBuf = ByteBuffer.allocateDirect(Math.min(buflen, 16*1024*1024))
       rows.foreach{ row =>
         count += 1
 //        System.err.println(s"Sending row ${row.index.toInt}, ${count} of ${rows.length}")
         nodeClients(rowWorkerAssignments(row.index.toInt).id).get.
-          newMatrix_addRow(handle, row.index, row.vector.toArray)
+          newMatrix_addRow(handle, row.index, row.vector.toArray, reuseBuf)
       }
       System.err.println("Finished sending rows")
       nodeClients.foreach(client => 

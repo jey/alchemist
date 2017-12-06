@@ -84,7 +84,7 @@ class WorkerClient(val hostname: String, val port: Int) {
 
   private def beginOutput(length: Int): ByteBuffer = {
     if(outbuf == null) {
-      outbuf = ByteBuffer.allocate(Math.max(length, 16 * 1024 * 1024))
+      outbuf = ByteBuffer.allocate(Math.min(length, 16 * 1024 * 1024))
     }
     assert(outbuf.position() == 0)
     if(outbuf.capacity() < length) {
@@ -96,22 +96,36 @@ class WorkerClient(val hostname: String, val port: Int) {
 
   private def beginInput(length: Int): ByteBuffer = {
     if(inbuf == null || inbuf.capacity() < length) {
-      inbuf = ByteBuffer.allocate(Math.max(length, 16 * 1024 * 1024))
+      inbuf = ByteBuffer.allocate(Math.min(length, 16 * 1024 * 1024))
     }
     inbuf.clear().limit(length)
     return inbuf
   }
 
-  def newMatrix_addRow(handle: MatrixHandle, rowIdx: Long, vals: Array[Double]) = {
-    val outbuf = beginOutput(4 + 4 + 8 + 8 + 8 * vals.length)
-    outbuf.putInt(0x1)  // typeCode = addRow
-    outbuf.putInt(handle.id)
-    outbuf.putLong(rowIdx)
-    outbuf.putLong(vals.length * 8)
-    outbuf.asDoubleBuffer().put(vals)
-    outbuf.position(outbuf.position() + 8 * vals.length)
+  def newMatrix_addRow(handle: MatrixHandle, rowIdx: Long, vals: Array[Double], myOutBuf: ByteBuffer = null) = {
+    if (myOutBuf == null) {
+        val outbuf = beginOutput(4 + 4 + 8 + 8 + 8 * vals.length)
+        outbuf.putInt(0x1)  // typeCode = addRow
+        outbuf.putInt(handle.id)
+        outbuf.putLong(rowIdx)
+        outbuf.putLong(vals.length * 8)
+        outbuf.asDoubleBuffer().put(vals)
+        outbuf.position(outbuf.position() + 8 * vals.length)
+        sendMessage(outbuf)
+    } else {
+        val buflen = 4 + 4 + 8 + 8 + 8 * vals.length
+        assert(myOutBuf.capacity() >= buflen)
+        myOutBuf.limit(buflen)
+        assert(myOutBuf.position() == 0)
+        myOutBuf.putInt(0x1)  // typeCode = addRow
+        myOutBuf.putInt(handle.id)
+        myOutBuf.putLong(rowIdx)
+        myOutBuf.putLong(vals.length * 8)
+        myOutBuf.asDoubleBuffer().put(vals)
+        myOutBuf.position(myOutBuf.position() + 8 * vals.length)
+        sendMessage(myOutBuf)
+    }
     //System.err.println(s"Sending row ${rowIdx} to ${hostname}:${port}")
-    sendMessage(outbuf)
     //System.err.println(s"Sent row ${rowIdx} successfully")
   }
 

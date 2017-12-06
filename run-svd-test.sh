@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH -p debug
-#SBATCH -N 30
-#SBATCH -t 00:15:00
+#SBATCH -N 17
+#SBATCH -t 00:30:00
 #SBATCH -e mysparkjob_%j.err
 #SBATCH -o mysparkjob_%j.out
 #SBATCH -C haswell
@@ -31,19 +31,19 @@ source setup/cori-start-alchemist.sh 8 2
 
 method=SVD
 # 2.5M by 10K double matrix is 200 GB
+m=5000000
 #m=2500000
-m=312500
 n=10000
 k=20
 # seems like if the partitions are too large, Spark will hang, so go for 2GB/partition
 partitions=200
 
 spark-submit --verbose\
-  --driver-memory 115g\
-  --executor-memory 115g\
+  --driver-memory 120G\
+  --executor-memory 120G\
   --executor-cores 32 \
   --driver-cores 32  \
-  --num-executors 21 \
+  --num-executors 8 \
   --conf spark.driver.extraLibraryPath=$SCRATCH/alchemistSHELL/alchemist/lib\
   --conf spark.executor.extraLibraryPath=$SCRATCH/alchemistSHELL/alchemist/lib\
   --conf spark.eventLog.enabled=true\

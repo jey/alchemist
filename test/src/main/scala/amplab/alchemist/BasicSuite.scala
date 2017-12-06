@@ -39,7 +39,7 @@ object BasicSuite {
         var partitions = if (args(3).toInt > 0) args(3).toInt else sc.defaultParallelism
         System.err.println(s"using ${partitions} parallelism for the rdds") 
 
-        val rows = RandomRDDs.normalVectorRDD(sc, m, n, partitions);
+        val rows = RandomRDDs.uniformVectorRDD(sc, m, n, partitions);
         rows.cache()
         val rdd = new IndexedRowMatrix(rows.zipWithIndex.map(x => new IndexedRow(x._2, x._1)))
 
@@ -76,10 +76,14 @@ object BasicSuite {
 
         val rows = RandomRDDs.normalVectorRDD(sc, m, n, partitions).zipWithIndex
         val rdd = new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, x._1)))
+        rdd.rows.cache
+        rdd.rows.count
+        System.err.println("done creating and caching dataset for SVD test")
 
         var txStart = ticks()
         val alMatA = AlMatrix(al, rdd)
         var txEnd = ticks()
+        System.err.println("done sending dataset for SVD test")
         var computeStart = txEnd
         val (alU, alS, alV) = al.truncatedSVD(alMatA, k) // returns sing vals in increas
         var computeEnd = ticks()
@@ -90,11 +94,13 @@ object BasicSuite {
         var rcEnd = ticks()
         System.err.println(s"Alchemist timing: send=${(txEnd-txStart)/1000.0}, svd=${(computeEnd-computeStart)/1000.0}, receive=${(rcEnd - rcStart)/1000.0}")
 
+/*
         computeStart = ticks()
         val svd = rdd.computeSVD(k, computeU = true) 
         svd.U.rows.count()
         computeEnd = ticks()
         System.err.println(s"Spark timing: svd= ${(computeEnd-computeStart)/1000.0}")
+        */
 
         al.stop
         sc.stop
@@ -114,9 +120,9 @@ object BasicSuite {
         val k = args(2).toInt
         val partitions = args(3).toInt
 
-        val rowsA = RandomRDDs.normalVectorRDD(sc, m, n, partitions).zipWithIndex
+        val rowsA = RandomRDDs.uniformVectorRDD(sc, m, n, partitions).zipWithIndex
         val sparkMatA = new IndexedRowMatrix(rowsA.map(x => new IndexedRow(x._2, x._1)))
-        val rowsB = RandomRDDs.normalVectorRDD(sc, n, k, partitions).zipWithIndex
+        val rowsB = RandomRDDs.uniformVectorRDD(sc, n, k, partitions).zipWithIndex
         val sparkMatB = new IndexedRowMatrix(rowsB.map(x => new IndexedRow(x._2, x._1)))
 
         var txStart = ticks()
@@ -308,7 +314,7 @@ object BasicSuite {
   }
 
   def randomMatrix(sc: SparkContext, numRows: Int, numCols: Int): IndexedRowMatrix = {
-    val rows = RandomRDDs.normalVectorRDD(sc, numRows, numCols, 128).zipWithIndex
+    val rows = RandomRDDs.uniformVectorRDD(sc, numRows, numCols, 128).zipWithIndex
     new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, x._1)))
   }
 

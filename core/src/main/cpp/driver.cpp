@@ -391,7 +391,7 @@ void Driver::handle_truncatedSVD() {
   //NB: it may be the case that n*nconv > 4 GB, then have to be careful!
   // assuming tall and skinny A for now
   MatrixXd rightVecs(n, nconv);
-  log->info("Allocated matrix for right eivenvectors of A'*A");
+  log->info("Allocated matrix for right eigenvectors of A'*A");
   // Eigen uses column-major layout by default!
   for(uint32_t idx = 0; idx < nconv; idx++)
     std::memcpy(rightVecs.col(idx).data(), prob.RawEigenvector(idx), n*sizeof(double));
@@ -413,6 +413,8 @@ void Driver::handle_truncatedSVD() {
   ENSURE(matrices.insert(std::make_pair(UHandle, Uinfo)).second);
   ENSURE(matrices.insert(std::make_pair(SHandle, Sinfo)).second);
   ENSURE(matrices.insert(std::make_pair(VHandle, Vinfo)).second);
+
+  log->info("Waiting on workers to store U,S,V");
 
   world.barrier();
   log->info("Writing ok status followed by U,S,V handles");

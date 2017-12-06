@@ -389,6 +389,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       mpi::broadcast(self->world, rightEigs.data(), n*nconv, 0);
       VectorXd singValsSq(nconv);
       mpi::broadcast(self->world, singValsSq.data(), nconv, 0);
+      self->log->info("Received the right eigenvectors and the eigenvalues");
 
       DistMatrix * U = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, nconv, self->grid);
       DistMatrix * S = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(nconv, 1, self->grid);
@@ -398,6 +399,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       ENSURE(self->matrices.insert(std::make_pair(UHandle, std::unique_ptr<DistMatrix>(U))).second);
       ENSURE(self->matrices.insert(std::make_pair(SHandle, std::unique_ptr<DistMatrix>(S))).second);
       ENSURE(self->matrices.insert(std::make_pair(VHandle, std::unique_ptr<DistMatrix>(V))).second);
+      self->log->info("Created new matrix objects to hold U,S,V");
 
       // populate V
       for(El::Int rowIdx=0; rowIdx < n; rowIdx++)
@@ -411,11 +413,13 @@ void TruncatedSVDCommand::run(Worker *self) const {
         if(Sinv->IsLocal(idx, 0))
           Sinv->SetLocal(Sinv->LocalRow(idx), 0, 1/std::sqrt(singValsSq(idx)));
       }
+      self->log->info("Stored V and S");
 
       // form U
       El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *V, 0.0, *U);
       // TODO: do a QR instead, but does column pivoting so would require postprocessing S,V to stay consistent
       El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);
+      self->log->info("Computed and stored U");
 
       break;
     }
