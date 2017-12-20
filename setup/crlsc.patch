@@ -1,0 +1,22 @@
+diff --git a/capi/crlsc.cpp b/capi/crlsc.cpp
+index d466a2a..952e998 100644
+--- a/capi/crlsc.cpp
++++ b/capi/crlsc.cpp
+@@ -26,7 +26,7 @@ SKYLARK_EXTERN_API int sl_kernel_rlsc(
+     std::stringstream data;
+     data << params_json;
+     boost::property_tree::read_json(data, json_tree);
+-    skylark::ml::rlsc_params_t params(data);
++    skylark::ml::rlsc_params_t params(json_tree);
+ 
+     auto *rcoding = new std::vector<El::Int>();
+ 
+@@ -68,7 +68,7 @@ SKYLARK_EXTERN_API int sl_approximate_kernel_rlsc(
+     std::stringstream data;
+     data << params_json;
+     boost::property_tree::read_json(data, json_tree);
+-    skylark::ml::rlsc_params_t params(data);
++    skylark::ml::rlsc_params_t params(json_tree);
+     
+ 
+     auto *rcoding = new std::vector<El::Int>();

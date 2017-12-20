@@ -2,6 +2,8 @@
 set -o verbose
 set -o errexit
 
+# This script installs the prerequisites for building Alchemist on Cori
+#
 # How to use this script:
 #
 #   ssh cori
@@ -17,13 +19,16 @@ ALPREFIX=$ALROOT/bins
 
 WITH_GMP=1
 WITH_EL=1
+WITH_RANDOM123=1
+WITH_SKYLARK=1
 WITH_ARPACK=1
 WITH_ARPACKPP=1
 WITH_EIGEN=1
 WITH_SPDLOG=1
 
 # Check that the cmake toolchain file is where we expect
-[ -f $ALROOT/alchemist/setup/Cori-gnu.cmake ]
+TOOLCHAIN=$ALROOT/alchemist/setup/Cori-gnu.cmake
+[ -f "$TOOLCHAIN" ]
 
 # Setup
 module unload PrgEnv-intel
@@ -34,6 +39,8 @@ module load python
 module load boost
 module load cmake
 module load sbt
+module load fftw
+module load cray-hdf5-parallel
 export PATH=$ALPREFIX/bin:$PATH
 export CPATH=$ALPREFIX/include:$CPATH
 export LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
@@ -66,12 +73,43 @@ if [ "$WITH_EL" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
     -DCMAKE_Fortran_FLAGS="-dynamic" \
     ..
+  nice make -j16
+  make install
+  cd ../..
+fi
+
+# Random123
+if [ "$WITH_RANDOM123" = 1 ]; then
+  wget http://www.thesalmons.org/john/random123/releases/1.08/Random123-1.08.tar.gz
+  tar xvfz Random123-1.08.tar.gz
+  cp -r Random123-1.08/include/Random123 $ALPREFIX/include
+fi
+
+# need to use development-v0.30 branch and patch it
+if [ "$WITH_SKYLARK" = 1 ]; then
+  git clone https://github.com/xdata-skylark/libskylark.git
+  cd libskylark
+  git checkout development-v0.30
+  git apply $ALROOT/alchemist/setup/crlsc.patch
+  mkdir build
+  cd build
+  export ELEMENTAL_ROOT="$ALPREFIX"
+  export RANDOM123_ROOT="$ALPREFIX"
+  CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
+    -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+    -DCMAKE_BUILD_TYPE=RELEASE \
+    -DUSE_HYBRID=OFF \
+    -DUSE_FFTW=ON \
+    -DBUILD_PYTHON=OFF \
+    -DBUILD_SHARED_LIBS=ON \
+    -DBUILD_EXAMPLES=ON ..
   nice make -j16
   make install
   cd ../..
@@ -86,7 +124,7 @@ if [ "$WITH_ARPACK" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
@@ -106,7 +144,7 @@ if [ "$WITH_ARPACKPP" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
@@ -125,7 +163,7 @@ if [ "$WITH_EIGEN" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \
@@ -145,7 +183,7 @@ if [ "$WITH_SPDLOG" = 1 ]; then
   cd build
   cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-    -DCMAKE_TOOLCHAIN_FILE="$ALROOT/alchemist/setup/Cori-gnu.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="-dynamic" \
     -DCMAKE_CXX_FLAGS="-dynamic" \

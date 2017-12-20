@@ -325,6 +325,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
     self->log->info("relayout took {} ms", relayoutDuration.count());
   }
 
+  /*
   // Retrieve your local block of rows and compute local contribution to A'*A
   MatrixXd localData(workingMat->LocalHeight(), n);
 
@@ -332,7 +333,6 @@ void TruncatedSVDCommand::run(Worker *self) const {
   auto startFillLocalMat = std::chrono::system_clock::now();
 
   // may be SUPERSLOW? use LockedBuffers for local manipulations?
-  /*
   self->log->info("Computing local contribution to the Gramian matrix");
   std::vector<El::Int> rowMap(localData.rows());
   for(El::Int rowIdx = 0; rowIdx < m; ++rowIdx)
@@ -342,7 +342,6 @@ void TruncatedSVDCommand::run(Worker *self) const {
       for(El::Int colIdx = 0; colIdx < n; ++colIdx)
         localData(localRowIdx, colIdx) = workingMat->GetLocal(localRowIdx, colIdx);
     }
-    */
 
   // Need to double-check is doing the right thing
   self->log->info("Extracting the local rows");
@@ -359,11 +358,19 @@ void TruncatedSVDCommand::run(Worker *self) const {
   // time-wise to precompute GramMat). trade-off depends on k (through the number of Arnoldi iterations we'll end up needing), the
   // amount of memory we have free to store GramMat, and the number of cores we have available
   MatrixXd gramMat = localData.transpose()*localData;
+  */
+  self->log->info("Computing the local contribution to A'*A");
+  auto startFillLocalMat = std::chrono::system_clock::now();
+  El::Matrix<double> localGramChunk(n, n);
+  El::Gemm(El::TRANSPOSE, El::NORMAL, 1.0, workingMat->LockedMatrix(), workingMat->LockedMatrix(), 0.0, localGramChunk);
   std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
   self->log->info("Took {} ms to compute local contribution to A'*A", fillLocalMat_duration.count());
 
   uint32_t command;
   std::unique_ptr<double[]> vecIn{new double[n]};
+  El::Matrix<double> x(n, 1);
+  El::Matrix<double> y(n, 1);
+  x.LockedAttach(n, 1, vecIn.get(), 1);
 
   self->log->info("finished initialization for truncated SVD");
 
@@ -371,15 +378,8 @@ void TruncatedSVDCommand::run(Worker *self) const {
     mpi::broadcast(self->world, command, 0);
     if (command == 1) {
       mpi::broadcast(self->world, vecIn.get(), n, 0);
-
-      Eigen::Map<VectorXd> x(vecIn.get(), n);
-      auto startMvProd = std::chrono::system_clock::now();
-      VectorXd y = gramMat * x;
-      //VectorXd y = localData.transpose()* (localData*x);
-      std::chrono::duration<double, std::milli> elapsed_msMvProd(std::chrono::system_clock::now() - startMvProd);
-      //std::cerr << self->world.rank() << ": Took " << elapsed_msMvProd.count() << "ms to multiply A'*A*x\n";
-
-      mpi::reduce(self->world, y.data(), n, std::plus<double>(), 0);
+      El::Gemv(El::NORMAL, 1.0, localGramChunk, x, 0.0, y);
+      mpi::reduce(self->world, y.LockedBuffer(), n, std::plus<double>(), 0);
     }
     if (command == 2) {
       uint32_t nconv;
@@ -416,7 +416,10 @@ void TruncatedSVDCommand::run(Worker *self) const {
       self->log->info("Stored V and S");
 
       // form U
+      self->log->info("computing A*V");
+      self->log->info("A is {}-by-{}, V is {}-by-{}, the resulting matrix should be {}-by-{}", A->Height(), A->Width(), V->Height(), V->Width(), U->Height(), U->Width());
       El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *V, 0.0, *U);
+      self->log->info("done computing A*V");
       // TODO: do a QR instead, but does column pivoting so would require postprocessing S,V to stay consistent
       El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);
       self->log->info("Computed and stored U");
