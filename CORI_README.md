@@ -14,15 +14,15 @@ make check # will run the current test suite
 ## Clone the Alchemist repo and set the ALPREFIX environment variable to where supporting libraries are installed
 ```
 bash # need to use bash
-mkdir -p $SCRATCH/alchemistSHELL
-cd $SCRATCH/alchemistSHELL
+mkdir -p $SCRATCH/alchemistbase
+cd $SCRATCH/alchemistbase
 git clone https://github.com/alexgittens/alchemist.git
 git checkout cori-version 
 source ./alchemist/setup/cori-bootstrap.sh
 
 module unload PrgEnv-intel
-module load PrgEnv-gnu gcc java cmake python boost sbt
-export ALPREFIX=$SCRATCH/alchemistSHELL/bins
+module load PrgEnv-gnu gcc java python boost sbt cray-hdf5-parallel fftw
+export ALPREFIX=$SCRATCH/alchemistbase/bins
 
 cd alchemist
 make build

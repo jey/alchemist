@@ -14,3 +14,5 @@
 * need to fix kMeans on Spark and Alchemist side to use all the options passed in
 * need to fix kMeans on Alchemist side to use the seed appropriately on driver and workers
 * need to go through and uniformatize the datatype used for row/col indices (e.g. am sure in kmeans code, am using uint32_t for sampling row indices, but the rows can be longs)
+
+* bette placement of the third-party dependencies? want them to be under the alchemist/ directory for simplicity

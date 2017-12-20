@@ -91,6 +91,7 @@ if [ "$WITH_RANDOM123" = 1 ]; then
   cp -r Random123-1.08/include/Random123 $ALPREFIX/include
 fi
 
+# Skylark
 # need to use development-v0.30 branch and patch it
 if [ "$WITH_SKYLARK" = 1 ]; then
   git clone https://github.com/xdata-skylark/libskylark.git
