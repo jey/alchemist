@@ -160,6 +160,62 @@ struct TransposeCommand : Command {
   }
 };
 
+struct SkylarkKernelSolverCommand : Command {
+    MatrixHandle features;
+    MatrixHandle targets;
+    uint32_t regression; // regression by default (0 for classification)
+    uint32_t lossfunction;
+    uint32_t regularizer;
+    uint32_t kernel;
+    double kernelparam;
+    double kernelparam2;
+    double kernelparam3;
+    double lambda;
+    uint32_t maxiter;
+    double tolerance;
+    double rho;
+    uint32_t seed;
+    uint32_t randomfeatures;
+    uint32_t numfeaturepartitions;
+
+    explicit SkylarkKernelSolverCommand() {}
+
+    SkylarkKernelSolverCommand(MatrixHandle features, MatrixHandle targets, uint32_t regression,
+        uint32_t lossfunction, uint32_t regularizer, uint32_t kernel, 
+        double kernelparam, double kernelparam2, double kernelparam3, 
+        double lambda, uint32_t maxiter, double tolerance, double rho, 
+        uint32_t seed, uint32_t randomfeatures, uint32_t numfeaturepartitions) : 
+        features(features), targets(targets), regression(regression),
+        lossfunction(lossfunction), regularizer(regularizer), kernel(kernel),
+        kernelparam(kernelparam), kernelparam2(kernelparam2), kernelparam3(kernelparam3),
+        lambda(lambda), maxiter(maxiter), tolerance(tolerance), rho(rho),
+        seed(seed), randomfeatures(randomfeatures), numfeaturepartitions(numfeaturepartitions) {
+        }
+
+    virtual void run(Worker *self) const;
+
+    template <typename Archive>
+    void serialize(Archive & ar, const unsigned version) {
+        ar & serialization::base_object<Command>(*this);
+        ar & features;
+        ar & targets;
+        ar & regression;
+        ar & lossfunction;
+        ar & regularizer;
+        ar & kernel;
+        ar & kernelparam;
+        ar & kernelparam2;
+        ar & kernelparam3;
+        ar & lambda;
+        ar & maxiter;
+        ar & tolerance;
+        ar & rho;
+        ar & seed;
+        ar & randomfeatures;
+        ar & numfeaturepartitions;
+    }
+};
+
 struct KMeansCommand : Command {
   MatrixHandle origMat;
   uint32_t numCenters;
@@ -384,5 +440,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::ThinSVDCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::TransposeCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::KMeansCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::TruncatedSVDCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkKernelSolverCommand);
 
 #endif

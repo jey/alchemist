@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include "spdlog/spdlog.h"
+#include <skylark.hpp>
+#include "hilbert.hpp"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -161,6 +163,28 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
 
   clusterCenters.setZero();
   mpi::broadcast(self->world, clusterCenters.data(), clusterCenters.rows()*d, 0);
+}
+
+void SkylarkKernelSolverCommand::run(Worker *self) const {
+
+    // for now only handle some of the options, otherwise use SKYLARK defaults
+    char ** emptystrarray;
+    hilbert_options_t options(0, emptystrarray, self->peers.size());
+
+    options.regression = true;
+    options.kernel = K_GAUSSIAN;
+    options.kernelparam = kernelparam;
+    options.kernelparam2 = kernelparam2;
+    options.kernelparam3 = kernelparam3;
+    options.lambda = lambda;
+    options.seed = seed;
+    options.randomfeatures = randomfeatures;
+
+    skylark::base::context_t context(options.seed);
+    El::Matrix<double> localX = self->matrices[features].get()->LockedMatrix();
+    El::Matrix<double> localY = self->matrices[features].get()->LockedMatrix();
+    skylark::ml::LargeScaleKernelLearning(self->peers, localX, 
+        localY, context, options);
 }
 
 // TODO: add seed as argument (make sure different workers do different things)

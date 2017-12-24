@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -p debug
-#SBATCH -N 43
+#SBATCH -N 5
 #SBATCH -t 00:30:00
 #SBATCH -e mysparkjob_%j.err
 #SBATCH -o mysparkjob_%j.out
@@ -27,24 +27,27 @@
 # Spark is horrible w.r.t. using memory efficiently.
 
 module unload darshan
-source setup/cori-start-alchemist.sh 30 2
+source setup/cori-start-alchemist.sh 2 4
 
 method=SVD
 # 2.5M by 10K double matrix is 200 GB
 # m=5000000
-m=10000000
-#m=2500000
+#m=10000000
+m=2500000 
 n=10000
 k=20
+
 # seems like if the partitions are too large, Spark will hang, so go for 2GB/partition
-partitions=200
+# 0 tells Spark to use default parallelism
+#partitions=200
+partitions=0
 
 spark-submit --verbose\
   --driver-memory 120G\
   --executor-memory 120G\
   --executor-cores 32 \
   --driver-cores 32  \
-  --num-executors 12 \
+  --num-executors 2 \
   --conf spark.driver.extraLibraryPath=$SCRATCH/alchemistSHELL/alchemist/lib\
   --conf spark.executor.extraLibraryPath=$SCRATCH/alchemistSHELL/alchemist/lib\
   --conf spark.eventLog.enabled=true\

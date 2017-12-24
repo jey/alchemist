@@ -1,6 +1,6 @@
 #!/bin/bash
 set -o verbose
-set -o errexit
+#set -o errexit
 
 # This script installs the prerequisites for building Alchemist on Cori
 #
@@ -68,7 +68,7 @@ fi
 if [ "$WITH_EL" = 1 ]; then
   git clone https://github.com/elemental/Elemental
   cd Elemental
-  git checkout v0.87.7
+  git checkout tags/v0.87.4
   mkdir build
   cd build
   cmake \
@@ -92,12 +92,9 @@ if [ "$WITH_RANDOM123" = 1 ]; then
 fi
 
 # Skylark
-# need to use development-v0.30 branch and patch it
 if [ "$WITH_SKYLARK" = 1 ]; then
   git clone https://github.com/xdata-skylark/libskylark.git
   cd libskylark
-  git checkout development-v0.30
-  git apply $ALROOT/alchemist/setup/crlsc.patch
   mkdir build
   cd build
   export ELEMENTAL_ROOT="$ALPREFIX"
@@ -114,7 +111,36 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   nice make -j16
   make install
   cd ../..
+
+  # for some reason, this didn't seem to install, so manually copy it over
+  # recheck in future and remove if unnecessary
+  cp -r libskylark/utility/fft $ALPREFIX/include/skylark/utility
 fi
+
+# # Skylark
+# # need to use development-v0.30 branch and patch it
+# if [ "$WITH_SKYLARK" = 1 ]; then
+#   git clone https://github.com/xdata-skylark/libskylark.git
+#   cd libskylark
+#   git checkout development-v0.30
+#   git apply $ALROOT/alchemist/setup/crlsc.patch
+#   mkdir build
+#   cd build
+#   export ELEMENTAL_ROOT="$ALPREFIX"
+#   export RANDOM123_ROOT="$ALPREFIX"
+#   CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
+#     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
+#     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+#     -DCMAKE_BUILD_TYPE=RELEASE \
+#     -DUSE_HYBRID=OFF \
+#     -DUSE_FFTW=ON \
+#     -DBUILD_PYTHON=OFF \
+#     -DBUILD_SHARED_LIBS=ON \
+#     -DBUILD_EXAMPLES=ON ..
+#   nice make -j16
+#   make install
+#   cd ../..
+# fi
 
 # arpack-ng
 if [ "$WITH_ARPACK" = 1 ]; then

@@ -43,6 +43,7 @@ struct Driver {
   void handle_getTranspose();
   void handle_kmeansClustering();
   void handle_truncatedSVD();
+  void handle_SkylarkKRR();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
@@ -142,6 +143,9 @@ int Driver::main() {
         handle_truncatedSVD();
         break;
 
+      case 0x9:
+        handle_SkylarkKRR();
+
       default:
         log->error("Unknown typeCode {#x}", typeCode);
         abort();
@@ -207,6 +211,38 @@ void Driver::handle_computeLowrankSVD() {
   output.flush();
 }
 */
+
+void Driver::handle_SkylarkKRR() {
+    MatrixHandle featureMat{input.readInt()};
+    MatrixHandle targetMat{input.readInt()};
+    uint32_t regression = input.readInt();
+    uint32_t lossfunction = input.readInt();
+    uint32_t regularizer = input.readInt();
+    uint32_t kernel = input.readInt();
+    double kernelparam = input.readDouble();
+    double kernelparam2 = input.readDouble();
+    double kernelparam3 = input.readDouble();
+    double lambda = input.readDouble();
+    uint32_t maxiter = input.readInt();
+    double tolerance = input.readDouble();
+    double rho = input.readDouble();
+    uint32_t seed = input.readInt();
+    uint32_t randomfeatures = input.readInt();
+    uint32_t numfeaturepartitions = input.readInt();
+
+    log->info("Starting Skylark's ADMM KRR solver on feature matrix {} and target matrix {}", featureMat, targetMat);
+    log->info("<should list arguments here>");
+
+    SkylarkKernelSolverCommand cmd(featureMat, targetMat, regression, 
+        lossfunction, regularizer, kernel, kernelparam, kernelparam2,
+        kernelparam3, lambda, maxiter, tolerance, rho, seed, randomfeatures,
+        numfeaturepartitions);
+    issue(cmd);
+
+    log->info("Finished calling Skylark's ADMM Kernel solver for this KRR problem");
+    output.writeInt(0x1);
+    output.flush();
+}
 
 // TODO: the cluster centers should be stored locally on driver and reduced/broadcasted. the current
 // way of updating kmeans centers is ridiculous
