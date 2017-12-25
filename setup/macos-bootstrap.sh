@@ -16,18 +16,14 @@ ALPREFIX=$ALROOT/bins
 
 # Set the following flags to indicate what needs to be installed
 WITH_BREW_PREREQS=0
-WITH_EL=0
-WITH_RANDOM123=0
-WITH_HDF5=0
+WITH_EL=1
+WITH_RANDOM123=1
+WITH_HDF5=1
 WITH_SKYLARK=1
 WITH_ARPACK=1
 WITH_ARPACKPP=1
 WITH_EIGEN=1
 WITH_SPDLOG=1
-
-# Check that the cmake toolchain file for Skylark is where we expect
-TOOLCHAIN=$ALROOT/alchemist/setup/MacOS-g++.cmake
-[ -f "$TOOLCHAIN" ]
 
 # install brewable prereqs if not already there
 # TODO: really don't like installing brew packages w/ nonstandard compiler, but works for now
@@ -122,7 +118,6 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   export RANDOM123_ROOT="$ALPREFIX"
 	export HDF5_ROOT=$ALPREFIX
   CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
-    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
     -DCMAKE_BUILD_TYPE=RELEASE \
     -DUSE_HYBRID=OFF \
@@ -133,6 +128,9 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   VERBOSE=1 nice make -j16
   make install
   cd ../..
+
+  # for some reason this directory is not installed, so manually copy it
+  cp -r libskylark/utility/fft $ALPREFIX/include/skylark/utility
 fi
 
 # arpack-ng
