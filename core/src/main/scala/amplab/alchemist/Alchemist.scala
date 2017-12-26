@@ -3,6 +3,8 @@ import org.apache.spark.SparkContext
 import org.apache.spark.mllib.linalg.DenseVector
 import scala.collection.JavaConverters._
 import scala.util.Random
+import scala.sys.process.{Process => SProcess}
+import scala.sys.env
 import java.io.{
     PrintWriter, FileOutputStream,
     InputStream, OutputStream,
@@ -387,7 +389,7 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
 class Driver {
   val listenSock = new java.net.ServerSocket(0);
 
-  val driverProc: Process = {
+  val driverProc : Process = {
     val pb = {
       if(System.getenv("NERSC_HOST") != null) {
         val sparkDriverNode = s"${System.getenv("SPARK_MASTER_NODE")}"
@@ -399,9 +401,13 @@ class Driver {
         pw.close
         // dummy process
         new ProcessBuilder("true")
-      } else {
-        new ProcessBuilder("mpirun", "-q", "-np", "4", "core/target/alchemist",
+      } else if(SProcess("uname -s").!!.stripLineEnd == "Darwin") {
+        val numAlchemistWorkers = sys.env.getOrElse("NUM_ALCHEMIST_WORKERS", "4")
+        new ProcessBuilder("mpirun", "-q", "-np", numAlchemistWorkers, "core/target/alchemist",
           "localhost", listenSock.getLocalPort().toString())
+      } else {
+        // shouldn't reach here
+        new ProcessBuilder("true")
       }
     }
     pb.redirectError(ProcessBuilder.Redirect.INHERIT).start

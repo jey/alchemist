@@ -14,16 +14,18 @@ set -o errexit
 ALROOT=$PWD
 ALPREFIX=$ALROOT/bins
 
+MAKE_THREADS=8
+
 # Set the following flags to indicate what needs to be installed
 WITH_BREW_PREREQS=0
-WITH_EL=1
-WITH_RANDOM123=1
-WITH_HDF5=1
+WITH_EL=0
+WITH_RANDOM123=0
+WITH_HDF5=0
 WITH_SKYLARK=1
-WITH_ARPACK=1
-WITH_ARPACKPP=1
-WITH_EIGEN=1
-WITH_SPDLOG=1
+WITH_ARPACK=0
+WITH_ARPACKPP=0
+WITH_EIGEN=0
+WITH_SPDLOG=0
 
 # install brewable prereqs if not already there
 # TODO: really don't like installing brew packages w/ nonstandard compiler, but works for now
@@ -68,7 +70,7 @@ if [ "$WITH_EL" = 1 ]; then
     -DCMAKE_BUILD_TYPE=Release \
     -DEL_IGNORE_OSX_GCC_ALIGNMENT_PROBLEM=ON \
     -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
-  nice make -j8
+  nice make -j"$MAKE_THREADS" 
   make install
   cd ../..
 fi
@@ -98,7 +100,7 @@ if [ "$WITH_HDF5" = 1 ]; then
 		--enable-fortran \
 		--with-zlib=/usr/local/opt/zlib/include,/usr/local/opt/zlib/lib \
 		--with-szlib=/usr/local/Cellar/szip/2.1.1/include/,/usr/local/Cellar/szip/2.1.1/lib/
-	nice make -j8
+	nice make -j"$MAKE_THREADS"
 	make install
 fi
 
@@ -123,11 +125,15 @@ if [ "$WITH_SKYLARK" = 1 ]; then
     -DUSE_HYBRID=OFF \
     -DUSE_FFTW=ON \
     -DBUILD_PYTHON=OFF \
-    -DBUILD_SHARED_LIBS=ON \
     -DBUILD_EXAMPLES=ON ..
-  VERBOSE=1 nice make -j16
+  VERBOSE=1 nice make -j"$MAKE_THREADS"
   make install
   cd ../..
+
+  # skylark's install messes with the id which gives dyld errors about
+  # not being able to find the libcskylark.so file, so give the correct id
+  # cf the cmake_install.cmake file in libskylark/build/capi
+  install_name_tool -id $ALPREFIX/lib/libcskylark.so $ALPREFIX/lib/libcskylark.so
 
   # for some reason this directory is not installed, so manually copy it
   cp -r libskylark/utility/fft $ALPREFIX/include/skylark/utility
@@ -146,8 +152,10 @@ if [ "$WITH_ARPACK" = 1 ]; then
     rm -rf build/*
   fi
   cd build
-  CC=gcc-7 FC=gfortran-7 cmake -DMPI=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
-  nice make -j8
+  cmake -DMPI=ON \
+    -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 fi
@@ -183,7 +191,7 @@ if [ "$WITH_EIGEN" = 1 ]; then
   fi
   cd build
   cmake -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
-  nice make -j8
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 fi
@@ -202,6 +210,6 @@ if [ "$WITH_SPDLOG" = 1 ]; then
   fi
   cd build
   cmake -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
-  make install -j8
+  make install -j"$MAKE_THREADS"
   cd ../..
 fi
