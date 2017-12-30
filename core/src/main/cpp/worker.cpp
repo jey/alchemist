@@ -415,10 +415,12 @@ void TruncatedSVDCommand::run(Worker *self) const {
       mpi::broadcast(self->world, singValsSq.data(), nconv, 0);
       self->log->info("Received the right eigenvectors and the eigenvalues");
 
-      DistMatrix * U = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, nconv, self->grid);
-      DistMatrix * S = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(nconv, 1, self->grid);
-      DistMatrix * Sinv = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(nconv, 1, self->grid);
-      DistMatrix * V = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, nconv, self->grid);
+      // let U,S,V also be stored as row-distributed, otherwise A will be relaid out when doing the 
+      // matrix multiply, which will increase the memory usage
+      DistMatrix * U = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(m, nconv, self->grid);
+      DistMatrix * S = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(nconv, 1, self->grid);
+      DistMatrix * Sinv = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(nconv, 1, self->grid);
+      DistMatrix * V = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, nconv, self->grid);
 
       ENSURE(self->matrices.insert(std::make_pair(UHandle, std::unique_ptr<DistMatrix>(U))).second);
       ENSURE(self->matrices.insert(std::make_pair(SHandle, std::unique_ptr<DistMatrix>(S))).second);
@@ -444,7 +446,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       self->log->info("A is {}-by-{}, V is {}-by-{}, the resulting matrix should be {}-by-{}", A->Height(), A->Width(), V->Height(), V->Width(), U->Height(), U->Width());
       El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *V, 0.0, *U);
       self->log->info("done computing A*V");
-      // TODO: do a QR instead, but does column pivoting so would require postprocessing S,V to stay consistent
+      // TODO: do a QR instead to ensure stability, but does column pivoting so would require postprocessing S,V to stay consistent
       El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);
       self->log->info("Computed and stored U");
 
@@ -458,7 +460,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
 void TransposeCommand::run(Worker *self) const {
   auto m = self->matrices[origMat]->Height();
   auto n = self->matrices[origMat]->Width();
-  DistMatrix * transposeA = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, m, self->grid);
+  DistMatrix * transposeA = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(n, m, self->grid);
   El::Zero(*transposeA);
 
   ENSURE(self->matrices.insert(std::make_pair(transposeMat, std::unique_ptr<DistMatrix>(transposeA))).second);
@@ -472,9 +474,9 @@ void ThinSVDCommand::run(Worker *self) const {
   auto m = self->matrices[mat]->Height();
   auto n = self->matrices[mat]->Width();
   auto k = std::min(m, n);
-  DistMatrix * U = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, k, self->grid);
-  DistMatrix * singvals = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(k, k, self->grid);
-  DistMatrix * V = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(n, k, self->grid);
+  DistMatrix * U = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(m, k, self->grid);
+  DistMatrix * singvals = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(k, k, self->grid);
+  DistMatrix * V = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(n, k, self->grid);
   El::Zero(*U);
   El::Zero(*V);
   El::Zero(*singvals);
@@ -483,7 +485,7 @@ void ThinSVDCommand::run(Worker *self) const {
   ENSURE(self->matrices.insert(std::make_pair(Shandle, std::unique_ptr<DistMatrix>(singvals))).second);
   ENSURE(self->matrices.insert(std::make_pair(Vhandle, std::unique_ptr<DistMatrix>(V))).second);
 
-  DistMatrix * Acopy = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, n, self->grid); // looking at source code for SVD, seems that DistMatrix Acopy(A) might generate copy rather than just copy metadata and risk clobbering
+  DistMatrix * Acopy = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(m, n, self->grid); // looking at source code for SVD, seems that DistMatrix Acopy(A) might generate copy rather than just copy metadata and risk clobbering
   El::Copy(*self->matrices[mat], *Acopy);
   El::SVD(*Acopy, *U, *singvals, *V);
   std::cerr << format("%s: singvals is %s by %s\n") % self->world.rank() % singvals->Height() % singvals->Width();
@@ -493,7 +495,7 @@ void ThinSVDCommand::run(Worker *self) const {
 void MatrixMulCommand::run(Worker *self) const {
   auto m = self->matrices[inputA]->Height();
   auto n = self->matrices[inputB]->Width();
-  DistMatrix * matrix = new El::DistMatrix<double, El::MC, El::MR, El::BLOCK>(m, n, self->grid);
+  DistMatrix * matrix = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(m, n, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
   //El::Display(*self->matrices[inputA], "A:");
