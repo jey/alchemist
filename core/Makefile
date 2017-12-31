@@ -5,6 +5,7 @@ include $(EL_PATH)/conf/ElVars
 SRC_PATH = src/main
 TARGET_PATH = target
 
+#CXXFLAGS += -DALDEBUG
 # put libEl's CXXFLAGS in front so ours can override it
 CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
 #CXXFLAGS += -Wall

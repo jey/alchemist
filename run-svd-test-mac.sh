@@ -19,10 +19,7 @@ partitions=0
 
 spark-submit --verbose\
   --master local[*] \
-  --driver-memory 1G\
-  --executor-memory 2G\
-  --num-executors 2 \
+  --driver-memory 4G\
   --class amplab.alchemist.BasicSuite\
-  --conf spark.memory.fraction=0.8 \
   test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $method $m $n $k $partitions 2>&1 | tee test.log
 exit

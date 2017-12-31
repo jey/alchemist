@@ -571,8 +571,13 @@ void Driver::handle_newMatrix() {
 
   log->info("Sending list of which worker each row should go to");
   output.writeInt(0x1); // statusCode
-  for(auto workerIdx: rowWorkerAssignments)
+  std::stringstream ss;
+  for(auto workerIdx: rowWorkerAssignments) {
     output.writeInt(workerIdx);
+    ALCHEMIST_TRACE(ss << workerIdx << ' ');
+  }
+  ALCHEMIST_TRACE(log->info(ss.str().c_str()));
+
   output.flush();
 
   log->info("Waiting for spark to finish sending data to the workers");

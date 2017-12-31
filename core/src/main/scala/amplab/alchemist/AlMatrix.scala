@@ -47,6 +47,8 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
 
 object AlMatrix {
   def apply(al: Alchemist, mat: IndexedRowMatrix): AlMatrix = {
+    // Sends the IndexedRowMatrix over to Alchemist as MD, STAR Elemental matrix
+    
     val ctx = al.context
     val workerIds = ctx.workerIds
     // rowWorkerAssignments is an array of WorkerIds whose ith entry is the world rank of the alchemist worker
@@ -59,7 +61,7 @@ object AlMatrix {
       var nodeClients = Array.fill(maxWorkerId+1)(None: Option[WorkerClient])
       System.err.println(s"Connecting to ${relevantWorkers.length} workers")
       relevantWorkers.foreach(node => nodeClients(node.id) = Some(ctx.connectWorker(node)))
-      System.err.println(s"Successfully connected to all workers")
+      System.err.println(s"Successfully connected to all workers; have ${rows.length} rows to send")
 
       // TODO: randomize the order the rows are sent in to avoid queuing issues?
       var count = 0

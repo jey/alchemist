@@ -20,13 +20,12 @@
 // #include "spdlog/fmt/ostr.h"
 #include "endian.h"
 
-#define UNLIKELY(x) __builtin_expect(!!(x), 0)
-
-#ifndef NDEBUG
+#ifdef ALDEBUG
 #define ENSURE(x) assert(x)
+#define ALCHEMIST_TRACE(x) do { x; } while(0)
 #else
-#define ENSURE(x) do { if(!(x)) { \
-  fprintf(stderr, "FATAL: invariant violated: %s:%d: %s\n", __FILE__, __LINE__, #x); fflush(stderr); abort(); } while(0)
+#define ENSURE(x) x
+#define ALCHEMIST_TRACE(x) do { } while(0)
 #endif
 
 namespace alchemist {

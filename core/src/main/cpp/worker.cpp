@@ -349,44 +349,19 @@ void TruncatedSVDCommand::run(Worker *self) const {
     self->log->info("relayout took {} ms", relayoutDuration.count());
   }
 
-  /*
-  // Retrieve your local block of rows and compute local contribution to A'*A
-  MatrixXd localData(workingMat->LocalHeight(), n);
-
-  self->log->info("Computing the local contribution to A'*A");
-  auto startFillLocalMat = std::chrono::system_clock::now();
-
-  // may be SUPERSLOW? use LockedBuffers for local manipulations?
-  self->log->info("Computing local contribution to the Gramian matrix");
-  std::vector<El::Int> rowMap(localData.rows());
-  for(El::Int rowIdx = 0; rowIdx < m; ++rowIdx)
-    if (workingMat->IsLocalRow(rowIdx)) {
-      auto localRowIdx = workingMat->LocalRow(rowIdx);
-      rowMap[localRowIdx] = rowIdx;
-      for(El::Int colIdx = 0; colIdx < n; ++colIdx)
-        localData(localRowIdx, colIdx) = workingMat->GetLocal(localRowIdx, colIdx);
-    }
-
-  // Need to double-check is doing the right thing
-  self->log->info("Extracting the local rows");
-  const El::Matrix<double> &localMat = workingMat->LockedMatrix();
-  const double * localChunk = localMat.LockedBuffer();
-  for(El::Int rowIdx = 0; rowIdx < localMat.Height(); ++rowIdx) 
-      for(El::Int colIdx = 0; colIdx < n; ++colIdx)
-          localData(rowIdx, colIdx) = localChunk[colIdx * localMat.LDim() + rowIdx];
-  self->log->info("Done extracting the local rows, now computing the local Gramian");
-  //self->log->info("Using {} threads", Eigen::nbThreads());
-
   //NB: sometimes it makes sense to precompute the gramMat (when it's cheap (we have a lot of cores and enough memory), sometimes
   // it makes more sense to compute A'*(A*x) separately each time (when we don't have enough memory for gramMat, or its too expensive
   // time-wise to precompute GramMat). trade-off depends on k (through the number of Arnoldi iterations we'll end up needing), the
   // amount of memory we have free to store GramMat, and the number of cores we have available
-  MatrixXd gramMat = localData.transpose()*localData;
-  */
   self->log->info("Computing the local contribution to A'*A");
+  self->log->info("Local matrix's dimensions are {}, {}", workingMat->LockedMatrix().Height(), workingMat->LockedMatrix().Width());
+  self->log->info("Storing A'*A in {},{} matrix", n, n);
   auto startFillLocalMat = std::chrono::system_clock::now();
   El::Matrix<double> localGramChunk(n, n);
-  El::Gemm(El::TRANSPOSE, El::NORMAL, 1.0, workingMat->LockedMatrix(), workingMat->LockedMatrix(), 0.0, localGramChunk);
+  if (workingMat->LockedMatrix().Height() > 0)
+    El::Gemm(El::TRANSPOSE, El::NORMAL, 1.0, workingMat->LockedMatrix(), workingMat->LockedMatrix(), 0.0, localGramChunk);
+  else
+    El::Zeros(localGramChunk, n, n);
   std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
   self->log->info("Took {} ms to compute local contribution to A'*A", fillLocalMat_duration.count());
 
@@ -532,7 +507,7 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 void NewMatrixCommand::run(Worker *self) const {
   auto handle = info.handle;
   self->log->info("Creating new distributed matrix");
-  DistMatrix *matrix = new El::DistMatrix<double, El::MD, El::STAR>(info.numRows, info.numCols, self->grid);
+  DistMatrix *matrix = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(info.numRows, info.numCols, self->grid);
   Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   self->log->info("Created new distributed matrix");
@@ -540,9 +515,14 @@ void NewMatrixCommand::run(Worker *self) const {
   std::vector<uint64_t> rowsOnWorker;
   self->log->info("Creating vector of local rows");
   rowsOnWorker.reserve(info.numRows);
+  std::stringstream ss;
+  ALCHEMIST_TRACE(ss << "Local rows: ");
   for(El::Int rowIdx = 0; rowIdx < info.numRows; ++rowIdx)
-    if (matrix->IsLocalRow(rowIdx)) 
+    if (matrix->IsLocalRow(rowIdx)) {
       rowsOnWorker.push_back(rowIdx);
+      ALCHEMIST_TRACE(ss << rowIdx << ' ');
+    }
+  ALCHEMIST_TRACE(self->log->info(ss.str()));
 
   for(int workerIdx = 1; workerIdx < self->world.size(); workerIdx++) {
     if( self->world.rank() == workerIdx ) {
