@@ -18,14 +18,15 @@ MAKE_THREADS=8
 
 # Set the following flags to indicate what needs to be installed
 WITH_BREW_PREREQS=0
-WITH_EL=0
-WITH_RANDOM123=0
-WITH_HDF5=0
+WITH_EL=1
+WITH_COMBBLAS=0
+WITH_RANDOM123=1
+WITH_HDF5=1
 WITH_SKYLARK=1
-WITH_ARPACK=0
-WITH_ARPACKPP=0
-WITH_EIGEN=0
-WITH_SPDLOG=0
+WITH_ARPACK=1
+WITH_ARPACKPP=1
+WITH_EIGEN=1
+WITH_SPDLOG=1
 
 # install brewable prereqs if not already there
 # TODO: really don't like installing brew packages w/ nonstandard compiler, but works for now
@@ -75,6 +76,36 @@ if [ "$WITH_EL" = 1 ]; then
   cd ../..
 fi
 
+# Combinatorial BLAS
+if [ "$WITH_COMBBLAS" = 1 ]; then
+  if [ ! -d CombBLAS_beta_16_1 ]; then
+    curl -L  http://eecs.berkeley.edu/~aydin/CombBLAS_FILES/CombBLAS_beta_16_1.tgz > CombBLAS_beta_16_1.tgz
+    tar xvfz CombBLAS_beta_16_1.tgz
+  fi
+  cd CombBLAS_beta_16_1
+  # the C and C++ compiler were explicitly set to mpicc and mpicxx, which call Clang. remove those settings
+  sed -i.bak -e '1,2d' CMakeLists.txt
+  if [ ! -d build ]; then
+    mkdir build
+  else
+    rm -rf build/*
+  fi
+  cd build
+  cmake \
+    -DCMAKE_EXE_LINKER_FLAGS="-lmpi" ..
+  nice make -j$MAKE_THREADS
+  if [ ! -d ../lib ]; then
+    mkdir ../lib
+  else
+    rm -rf ../lib/*
+  fi
+  cp *.a ../lib
+  cp graph500-1.2/generator/*.a ../lib
+  cp usort/*.a ../lib
+  cd ../..
+  cp -r CombBLAS_beta_16_1 $ALPREFIX
+fi
+
 # Random123
 if [ "$WITH_RANDOM123" = 1 ]; then
   if [ ! -d Random123-1.08 ]; then
@@ -117,6 +148,7 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   fi
   cd build
   export ELEMENTAL_ROOT="$ALPREFIX"
+  export COMBBLAS_ROOT="$ALPREFIX/CombBLAS_beta_16_1"
   export RANDOM123_ROOT="$ALPREFIX"
 	export HDF5_ROOT=$ALPREFIX
   CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
@@ -124,6 +156,7 @@ if [ "$WITH_SKYLARK" = 1 ]; then
     -DCMAKE_BUILD_TYPE=RELEASE \
     -DUSE_HYBRID=OFF \
     -DUSE_FFTW=ON \
+    -DUSE_COMBBLAS=OFF \
     -DBUILD_PYTHON=OFF \
     -DBUILD_EXAMPLES=ON ..
   VERBOSE=1 nice make -j"$MAKE_THREADS"
