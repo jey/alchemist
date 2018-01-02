@@ -17,6 +17,8 @@ ALPREFIX=$ALROOT/bins
 MAKE_THREADS=8
 
 # Set the following flags to indicate what needs to be installed
+# NOTE: skylark doesn't link against the available version of COMBBLAS, so enabling
+# COMBBLAS will build it, but skylark will not use it
 WITH_BREW_PREREQS=0
 WITH_EL=1
 WITH_COMBBLAS=0

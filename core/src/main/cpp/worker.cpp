@@ -881,13 +881,19 @@ void Worker::receiveMatrixBlocks(MatrixHandle handle) {
 int Worker::main() {
   // log to console as well as file (single-threaded logging)
   // TODO: allow to specify log directory, log level, etc.
+  // TODO: make thread-safe
+  // TODO: currently both stderr and logfile share the same report levels (can't have two sinks on same log with different level); use a split sink
+  //  a la https://github.com/gabime/spdlog/issues/345 to allow stderr to print error messages only
   std::vector<spdlog::sink_ptr> sinks;
-//  sinks.push_back(std::make_shared_ptr<spdlog::sinks::stdout_sink_st>()); // without ANSI color
-  sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>()); // with ANSI color
-  sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("rank-%d.log") % world.rank())));
+  auto stderr_sink = std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>(); // with ANSI color
+  auto logfile_sink = std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("rank-%d.log") % world.rank()));
+  stderr_sink->set_level(spdlog::level::err);
+  logfile_sink->set_level(spdlog::level::info); // change to warn for production
+  sinks.push_back(stderr_sink);
+  sinks.push_back(logfile_sink);
   log = std::make_shared<spdlog::logger>( str(format("worker-%d") % world.rank()),
       std::begin(sinks), std::end(sinks));
-  log->flush_on(spdlog::level::info); // change to warn for production
+
   log->info("Started worker");
   log->info("Max number of OpenMP threads: {}", omp_get_max_threads());
 
