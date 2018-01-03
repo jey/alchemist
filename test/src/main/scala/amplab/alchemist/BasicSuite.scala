@@ -11,6 +11,10 @@ import breeze.numerics._
 // TODO: break into separate tests
 
 object BasicSuite {
+  import LossType._
+  import RegularizerType._
+  import KernelType._
+
   def ticks(): Long = {
     return System.currentTimeMillis();
   }
@@ -26,6 +30,64 @@ object BasicSuite {
   }
 
   def testADMMKRR( args: Array[String] ): Unit = {
+    val conf = new SparkConf().setAppName("Alchemist ADMM KRR Test")
+    val sc = new SparkContext(conf)
+  
+    System.err.println("test: creating alchemist")
+    val al = new Alchemist(sc)
+    System.err.println("test: done creating alchemist")
+
+    // Only do regression w/ default params
+    var n = args(0).toInt // rows
+    var p = args(1).toInt // columns
+    var m = args(2).toInt // number of targets
+    var partitions = if (args(3).toInt > 0) args(3).toInt else sc.defaultParallelism
+    System.err.println(s"using ${partitions} parallelism for the rdds") 
+
+    // arguments to skylark's solver
+    val regression = true
+    val lossfunction = SQUARED
+    val regularizer = NOREG
+    val kernel = K_LINEAR
+    val kernelparam = 1.0
+    val kernelparam2 = 0.1
+    val kernelparam3 = 0.1
+    val lambda = 1.0
+    val maxiter = 20
+    val tolerance = 0.001
+    val rho = 1.0
+    val seed = 12345
+    val randomfeatures = 0
+    val numfeaturepartitions = 1
+
+    // generate system matrix
+    val rows = RandomRDDs.uniformVectorRDD(sc, n, p, partitions)
+    rows.cache()
+    val Ardd = new IndexedRowMatrix(rows.zipWithIndex.map(x => new IndexedRow(x._2, x._1)))
+
+    // create right hand sides
+    m = if (regression) 1 else m;
+    val dm = BDM.rand[Double](p, m) 
+    val Xstar = new DenseMatrix(dm.rows, dm.cols, dm.data, dm.isTranspose)
+    val Brdd = Ardd.multiply(Xstar)
+
+    var sendStart = ticks()
+    val alMatA = AlMatrix(al, Ardd)
+    val alMatB = AlMatrix(al, Brdd)
+    var sendEnd = ticks()
+    var computeStart = sendEnd
+    val alMatX = al.SkylarkADMMKRR(alMatA, alMatB, regression, lossfunction, regularizer,
+      kernel, kernelparam, kernelparam2, kernelparam3, lambda, maxiter, tolerance,
+      rho, seed, randomfeatures, numfeaturepartitions)
+    var computeEnd = ticks()
+    var receiveStart = computeEnd
+    var solXrdd = alMatX.getIndexedRowMatrix()
+    var receiveEnd = ticks()
+
+    System.err.println(s"Alchemist timing: send=${(sendEnd-sendStart)/1000.0}, compute=${(computeEnd-computeStart)/1000.0}, receive=${(receiveEnd - receiveStart)/1000.0}")
+
+    al.stop
+    sc.stop
   }
 
   def testLSQR( args: Array[String]): Unit = {

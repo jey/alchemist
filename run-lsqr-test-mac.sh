@@ -1,7 +1,7 @@
 #!/bin/bash
 # Assumes that spark-submit is in your PATH
 
-export NUM_ALCHEMIST_WORKERS=5
+export NUM_ALCHEMIST_RANKS=5
 export TMPDIR=/tmp
 
 method=LSQR

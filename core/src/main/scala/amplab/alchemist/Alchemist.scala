@@ -238,7 +238,7 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     kernelparam3: Double, lambda: Double, maxiter: Int, tolerance: Double,
     rho: Double, seed: Int, randomfeatures: Int, numfeaturepartitions: Int) : 
   MatrixHandle = {
-    output.writeInt(0x11)
+    output.writeInt(0x9)
     output.writeInt(featureMat.id)
     output.writeInt(targetMat.id)
     output.writeInt( if (regression) 1 else 0)
@@ -468,7 +468,7 @@ class Driver {
         // dummy process
         new ProcessBuilder("true")
       } else if(SProcess("uname -s").!!.stripLineEnd == "Darwin") {
-        val numAlchemistWorkers = sys.env.getOrElse("NUM_ALCHEMIST_WORKERS", "4")
+        val numAlchemistWorkers = scala.sys.env.getOrElse("NUM_ALCHEMIST_RANKS", "4") // remember one of these will be the driver process
         new ProcessBuilder("mpirun", "-q", "-np", numAlchemistWorkers, "core/target/alchemist",
           "localhost", listenSock.getLocalPort().toString())
       } else {
@@ -544,11 +544,12 @@ class Alchemist(val mysc: SparkContext) {
     new AlMatrix(this, handleX)
   }
 
+  // default values taken from skylark/ml/options.hpp
   def SkylarkADMMKRR(featureMat: AlMatrix, targetMat: AlMatrix, 
-    regression: Boolean, lossfunction: LossType, regularizer: RegularizerType,
-    kernel: KernelType, kernelparam : Double, kernelparam2: Double,
-    kernelparam3: Double, lambda: Double, maxiter: Int, tolerance: Double,
-    rho: Double, seed: Int, randomfeatures: Int, numfeaturepartitions: Int) : 
+    regression: Boolean = true, lossfunction: LossType = SQUARED, regularizer: RegularizerType = NOREG,
+    kernel: KernelType = K_LINEAR, kernelparam : Double = 1.0, kernelparam2: Double = 0.0,
+    kernelparam3: Double = 0.0, lambda: Double = 0.0, maxiter: Int = 20, tolerance: Double = 0.001,
+    rho: Double = 1.0, seed: Int = 12345, randomfeatures: Int = 0, numfeaturepartitions: Int = 1) : 
   AlMatrix = {
     val Xhandle = client.skylarkADMMKRR(featureMat.handle, targetMat.handle,
       regression, lossfunction.id, regularizer.id, kernel.id, kernelparam,

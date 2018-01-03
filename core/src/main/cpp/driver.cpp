@@ -239,7 +239,11 @@ void Driver::handle_SkylarkKRR() {
     log->info("Starting Skylark's ADMM KRR solver on feature matrix {} and target matrix {}", featureMat, targetMat);
     log->info("<should list arguments here>");
 
-    SkylarkKernelSolverCommand cmd(featureMat, targetMat, regression, 
+    auto numfeatures = matrices[featureMat].numCols;
+    auto numtargets = matrices[targetMat].numCols;
+    MatrixHandle coefs = registerMatrix(numfeatures, numtargets);
+
+    SkylarkKernelSolverCommand cmd(featureMat, targetMat, coefs, regression, 
         lossfunction, regularizer, kernel, kernelparam, kernelparam2,
         kernelparam3, lambda, maxiter, tolerance, rho, seed, randomfeatures,
         numfeaturepartitions);

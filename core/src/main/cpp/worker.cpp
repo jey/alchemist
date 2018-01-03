@@ -12,6 +12,7 @@
 #include "spdlog/spdlog.h"
 #include <skylark.hpp>
 #include "hilbert.hpp"
+#include "utils.hpp"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -204,27 +205,311 @@ void SkylarkLSQRSolverCommand::run(Worker *self) const {
   self->world.barrier();
 }
 
+// Note if we do regression, we can only have one rhs
+// The call to the ADMM solver follows  the template of the LargeScaleKernelLearning function in hilbert.hpp
 void SkylarkKernelSolverCommand::run(Worker *self) const {
-   // for now only handle some of the options, otherwise use SKYLARK defaults
-  char ** emptystrarray;
-  hilbert_options_t options(0, emptystrarray, self->peers.size());
 
-  options.regression = true;
-  options.kernel = K_GAUSSIAN;
-  options.kernelparam = kernelparam;
-  options.kernelparam2 = kernelparam2;
-  options.kernelparam3 = kernelparam3;
-  options.lambda = lambda;
-  options.seed = seed;
-  options.randomfeatures = randomfeatures;
+  // set some options that aren't currently passed in as arguments
+  bool usefast = false;
+  SequenceType seqtype = LEAPED_HALTON;
+  int numthreads = 1;
+  bool cachetransforms = true;
 
-  skylark::base::context_t context(options.seed);
+  skylark::base::context_t context(seed);
+  typedef El::Matrix<double> InputType;
+
   El::Matrix<double> localX = self->matrices[features].get()->LockedMatrix();
   El::Matrix<double> localY = self->matrices[features].get()->LockedMatrix();
-  skylark::ml::LargeScaleKernelLearning(self->peers, localX, 
-      localY, context, options);
+
+  // validation data
+  El::Matrix<double> localXv;
+  El::Matrix<double> localYv;
+
+  // don't know what the variable targets is used for
+  // shift indicates whether validation data should also be shifted
+  auto dimensions = skylark::base::Height(localX);
+  auto targets = regression ? 1 : GetNumTargets(self->peers, localY);
+  bool shift = false;
+
+  if (!regression && lossfunction == LOGISTIC && targets == 1) {
+    ShiftForLogistic(localY);
+    targets = 2;
+    shift = true;
+  }
+
+
+  skylark::algorithms::loss_t<double> *loss = NULL;
+  switch(lossfunction) {
+    case SQUARED:
+        loss = new skylark::algorithms::squared_loss_t<double>();
+        break;
+    case HINGE:
+        loss = new skylark::algorithms::hinge_loss_t<double>();
+        break;
+    case LOGISTIC:
+        loss = new skylark::algorithms::logistic_loss_t<double>();
+        break;
+    case LAD:
+        loss = new skylark::algorithms::lad_loss_t<double>();
+        break;
+		default:
+				break;
+  }
+
+	skylark::algorithms::regularizer_t<double> *reg = NULL;
+	if (lambda == 0 || regularizer == NOREG)
+			reg = new skylark::algorithms::empty_regularizer_t<double>();
+	else
+			switch(regularizer) {
+				case L2:
+						reg = new skylark::algorithms::l2_regularizer_t<double>();
+						break;
+				case L1:
+						reg = new skylark::algorithms::l1_regularizer_t<double>();
+						break;
+				default:
+						break;
+			}
+
+  BlockADMMSolver<InputType> *Solver = NULL;
+    int features = 0;
+    switch(kernel) {
+    case K_LINEAR:
+        features =
+            (randomfeatures == 0 ? dimensions : randomfeatures);
+        if (randomfeatures == 0)
+            Solver =
+                new BlockADMMSolver<InputType>(loss,
+                    reg,
+                    lambda,
+                    dimensions,
+                    numfeaturepartitions);
+        else
+            Solver =
+                new BlockADMMSolver<InputType>(context,
+                    loss,
+                    reg,
+                    lambda,
+                    features,
+                    skylark::ml::linear_t(dimensions),
+                    skylark::ml::sparse_feature_transform_tag(),
+                    numfeaturepartitions);
+        break;
+
+    case K_GAUSSIAN:
+        features = randomfeatures;
+        if (!usefast)
+            if (seqtype == LEAPED_HALTON)
+                Solver =
+                    new BlockADMMSolver<InputType>(context,
+                        loss,
+                        reg,
+                        lambda,
+                        features,
+                        skylark::ml::gaussian_t(dimensions,
+                            kernelparam),
+                        skylark::ml::quasi_feature_transform_tag(),
+                        numfeaturepartitions);
+            else
+                Solver =
+                    new BlockADMMSolver<InputType>(context,
+                        loss,
+                        reg,
+                        lambda,
+                        features,
+                        skylark::ml::gaussian_t(dimensions,
+                            kernelparam),
+                        skylark::ml::regular_feature_transform_tag(),
+                        numfeaturepartitions);
+        else
+            Solver =
+                new BlockADMMSolver<InputType>(context,
+                    loss,
+                    reg,
+                    lambda,
+                    features,
+                    skylark::ml::gaussian_t(dimensions,
+                        kernelparam),
+                    skylark::ml::fast_feature_transform_tag(),
+                    numfeaturepartitions);
+        break;
+
+    case K_POLYNOMIAL:
+        features = randomfeatures;
+        Solver =
+            new BlockADMMSolver<InputType>(context,
+                loss,
+                reg,
+                lambda,
+                features,
+                skylark::ml::polynomial_t(dimensions,
+                    kernelparam, kernelparam2, kernelparam3),
+                skylark::ml::regular_feature_transform_tag(),
+                numfeaturepartitions);
+        break;
+
+    case K_MATERN:
+        features = randomfeatures;
+        if (!usefast)
+            Solver =
+                new BlockADMMSolver<InputType>(context,
+                    loss,
+                    reg,
+                    lambda,
+                    features,
+                    skylark::ml::matern_t(dimensions,
+                        kernelparam, kernelparam2),
+                    skylark::ml::regular_feature_transform_tag(),
+                    numfeaturepartitions);
+        else
+            Solver =
+                new BlockADMMSolver<InputType>(context,
+                    loss,
+                    reg,
+                    lambda,
+                    features,
+                    skylark::ml::matern_t(dimensions,
+                        kernelparam, kernelparam2),
+                    skylark::ml::fast_feature_transform_tag(),
+                    numfeaturepartitions);
+        break;
+
+    case K_LAPLACIAN:
+        features = randomfeatures;
+        if (seqtype == LEAPED_HALTON)
+            new BlockADMMSolver<InputType>(context,
+                loss,
+                reg,
+                lambda,
+                features,
+                skylark::ml::laplacian_t(dimensions,
+                    kernelparam),
+                skylark::ml::quasi_feature_transform_tag(),
+                numfeaturepartitions);
+        else
+            Solver =
+                new BlockADMMSolver<InputType>(context,
+                    loss,
+                    reg,
+                    lambda,
+                    features,
+                    skylark::ml::laplacian_t(dimensions,
+                        kernelparam),
+                    skylark::ml::regular_feature_transform_tag(),
+                    numfeaturepartitions);
+
+        break;
+
+    case K_EXPSEMIGROUP:
+        features = randomfeatures;
+        if (seqtype == LEAPED_HALTON)
+            new BlockADMMSolver<InputType>(context,
+                loss,
+                reg,
+                lambda,
+                features,
+                skylark::ml::expsemigroup_t(dimensions,
+                    kernelparam),
+                skylark::ml::quasi_feature_transform_tag(),
+                numfeaturepartitions);
+        else
+            Solver =
+                new BlockADMMSolver<InputType>(context,
+                    loss,
+                    reg,
+                    lambda,
+                    features,
+                    skylark::ml::expsemigroup_t(dimensions,
+                        kernelparam),
+                    skylark::ml::regular_feature_transform_tag(),
+                    numfeaturepartitions);
+        break;
+
+    default:
+        // TODO!
+        break;
+
+    }
+
+    // Set parameters
+    Solver->set_rho(rho);
+    Solver->set_maxiter(maxiter);
+    Solver->set_tol(tolerance);
+    Solver->set_nthreads(numthreads);
+    Solver->set_cache_transform(cachetransforms);
+
+  self->log->info("Training solver");
+  skylark::ml::hilbert_model_t * model = Solver->train(localX, localY, localXv, localYv, regression, self->peers);
+  self->log->info("Finished training, now retreiving coefficients");
+  El::Matrix<double> X = model->get_coef();
+
+  // Convert the model coefficients to a distributed matrix and store in the matrix table
+  DistMatrix * Xdist = new El::DistMatrix<double, El::MD, El::STAR>(X.Height(), X.Width(), self->grid);
+  for(uint32_t row = 0; row < Xdist->Height(); row++) 
+    if (Xdist->IsLocalRow(row)) 
+      for (uint32_t col = 0; col < Xdist->Width(); col++)
+        Xdist->Set(row, col, X.Get(row,col));
+  ENSURE(self->matrices.insert(std::make_pair(coefs, std::unique_ptr<DistMatrix>(Xdist))).second);
+
   self->world.barrier();
 }
+
+// // Note if we do regression, we can only have one rhs
+// // The call to the ADMM solver follows  the template of the LargeScaleKernelLearning function in hilbert.hpp
+// void SkylarkKernelSolverCommand::run(Worker *self) const {
+//    // for now only handle some of the options, otherwise use SKYLARK defaults
+//   char * arrayOfOptions[2] = {"--modelfile", "blah"};
+//   self->log->info("Creating solver options");
+//   hilbert_options_t options(2, arrayOfOptions, self->peers.size());
+// 
+//   options.regression = true;
+//   options.kernel = K_GAUSSIAN;
+//   options.kernelparam = kernelparam;
+//   options.kernelparam2 = kernelparam2;
+//   options.kernelparam3 = kernelparam3;
+//   options.lambda = lambda;
+//   options.seed = seed;
+//   options.randomfeatures = randomfeatures;
+// 
+//   self->log->info("Creating Skylark context");
+//   skylark::base::context_t context(options.seed);
+// 
+//   El::Matrix<double> localX = self->matrices[features].get()->LockedMatrix();
+//   El::Matrix<double> localY = self->matrices[features].get()->LockedMatrix();
+// 
+//   // validation data
+//   El::Matrix<double> localXv;
+//   El::Matrix<double> localYv;
+// 
+//   // don't know what the variable targets is used for
+//   // shift indicates whether validation data should also be shifted
+//   auto dimensions = skylark::base::Height(localX);
+//   auto targets = options.regression ? 1 : GetNumTargets(self->peers, localY);
+//   bool shift = false;
+// 
+//   if (!options.regression && options.lossfunction == LOGISTIC && targets == 1) {
+//     ShiftForLogistic(localY);
+//     targets = 2;
+//     shift = true;
+//   }
+// 
+//   self->log->info("Creating solver");
+// 
+//   BlockADMMSolver<El::Matrix<double>> * Solver = GetSolver<El::Matrix<double>>(context, options, dimensions);
+//   self->log->info("Training solver");
+//   skylark::ml::hilbert_model_t * model = Solver->train(localX, localY, localXv, localYv, options.regression, self->peers);
+//   El::Matrix<double> X = model->get_coef();
+// 
+//   // Convert the model coefficients to a distributed matrix and store in the matrix table
+//   DistMatrix * Xdist = new El::DistMatrix<double, El::MD, El::STAR>(X.Height(), X.Width(), self->grid);
+//   for(uint32_t row = 0; row < Xdist->Height(); row++) 
+//     if (Xdist->IsLocalRow(row)) 
+//       for (uint32_t col = 0; col < Xdist->Width(); col++)
+//         Xdist->Set(row, col, X.Get(row,col));
+//   ENSURE(self->matrices.insert(std::make_pair(coefs, std::unique_ptr<DistMatrix>(Xdist))).second);
+// 
+//   self->world.barrier();
+// }
 
 // TODO: add seed as argument (make sure different workers do different things)
 void KMeansCommand::run(Worker *self) const {

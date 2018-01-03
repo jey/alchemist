@@ -162,6 +162,7 @@ struct TransposeCommand : Command {
 struct SkylarkKernelSolverCommand : Command {
     MatrixHandle features;
     MatrixHandle targets;
+    MatrixHandle coefs;
     bool regression; // regression by default (false for classification)
     uint32_t lossfunction;
     uint32_t regularizer;
@@ -179,7 +180,7 @@ struct SkylarkKernelSolverCommand : Command {
 
     explicit SkylarkKernelSolverCommand() {}
 
-    SkylarkKernelSolverCommand(MatrixHandle features, MatrixHandle targets, bool regression,
+    SkylarkKernelSolverCommand(MatrixHandle features, MatrixHandle targets, MatrixHandle coefs, bool regression,
         uint32_t lossfunction, uint32_t regularizer, uint32_t kernel, 
         double kernelparam, double kernelparam2, double kernelparam3, 
         double lambda, uint32_t maxiter, double tolerance, double rho, 
@@ -198,6 +199,7 @@ struct SkylarkKernelSolverCommand : Command {
         ar & serialization::base_object<Command>(*this);
         ar & features;
         ar & targets;
+        ar & coefs;
         ar & regression;
         ar & lossfunction;
         ar & regularizer;
