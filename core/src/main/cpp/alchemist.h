@@ -162,7 +162,7 @@ struct TransposeCommand : Command {
 struct SkylarkKernelSolverCommand : Command {
     MatrixHandle features;
     MatrixHandle targets;
-    uint32_t regression; // regression by default (0 for classification)
+    bool regression; // regression by default (false for classification)
     uint32_t lossfunction;
     uint32_t regularizer;
     uint32_t kernel;
@@ -179,7 +179,7 @@ struct SkylarkKernelSolverCommand : Command {
 
     explicit SkylarkKernelSolverCommand() {}
 
-    SkylarkKernelSolverCommand(MatrixHandle features, MatrixHandle targets, uint32_t regression,
+    SkylarkKernelSolverCommand(MatrixHandle features, MatrixHandle targets, bool regression,
         uint32_t lossfunction, uint32_t regularizer, uint32_t kernel, 
         double kernelparam, double kernelparam2, double kernelparam3, 
         double lambda, uint32_t maxiter, double tolerance, double rho, 
@@ -213,6 +213,32 @@ struct SkylarkKernelSolverCommand : Command {
         ar & randomfeatures;
         ar & numfeaturepartitions;
     }
+};
+
+struct SkylarkLSQRSolverCommand : Command {
+  MatrixHandle A; 
+  MatrixHandle B;
+  MatrixHandle X;
+  double tolerance;
+  uint32_t iter_lim;
+
+  explicit SkylarkLSQRSolverCommand() {}
+
+  SkylarkLSQRSolverCommand(MatrixHandle A, MatrixHandle B, MatrixHandle X, 
+      double tolerance, uint32_t iter_lim): 
+    A(A), B(B), X(X), tolerance(tolerance), iter_lim(iter_lim) {};
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive &ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & A;
+    ar & B;
+    ar & X;
+    ar & tolerance;
+    ar & iter_lim;
+  }
 };
 
 struct KMeansCommand : Command {
@@ -440,5 +466,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::TransposeCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::KMeansCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::TruncatedSVDCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkKernelSolverCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkLSQRSolverCommand);
 
 #endif

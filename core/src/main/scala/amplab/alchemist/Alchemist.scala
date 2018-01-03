@@ -19,6 +19,21 @@ import java.nio.file.{Paths, Files}
 import java.nio.charset.StandardCharsets
 import scala.compat.Platform.EOL
 
+object LossType extends Enumeration {
+  type LossType = Value
+  val SQUARED, LAD, HINGE, LOGISTIC = Value
+}
+
+object RegularizerType extends Enumeration {
+  type RegularizerType = Value
+  val NOREG, L2, L1 = Value
+}
+
+object KernelType extends Enumeration {
+  type KernelType = Value
+  val K_LINEAR, K_GAUSSIAN, K_POLYNOMIAL, K_LAPLACIAN, K_EXPSEMIGROUP, K_MATERN = Value
+}
+
 class DataInputStream(istream: InputStream) extends JDataInputStream(istream) {
   def readArrayLength(): Int = {
     val result = readLong()
@@ -215,6 +230,57 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     }
     System.err.println(s"got handle: ${transposeHandle.id}")
     transposeHandle
+  }
+
+  def skylarkADMMKRR(featureMat: MatrixHandle, targetMat: MatrixHandle, 
+    regression: Boolean, lossfunction: Int, regularizer: Int,
+    kernel: Int, kernelparam : Double, kernelparam2: Double,
+    kernelparam3: Double, lambda: Double, maxiter: Int, tolerance: Double,
+    rho: Double, seed: Int, randomfeatures: Int, numfeaturepartitions: Int) : 
+  MatrixHandle = {
+    output.writeInt(0x11)
+    output.writeInt(featureMat.id)
+    output.writeInt(targetMat.id)
+    output.writeInt( if (regression) 1 else 0)
+    output.writeInt(lossfunction)
+    output.writeInt(regularizer)
+    output.writeInt(kernel)
+    output.writeDouble(kernelparam)
+    output.writeDouble(kernelparam2)
+    output.writeDouble(kernelparam3)
+    output.writeDouble(lambda)
+    output.writeInt(maxiter)
+    output.writeDouble(tolerance)
+    output.writeDouble(rho)
+    output.writeInt(seed)
+    output.writeInt(randomfeatures)
+    output.writeInt(numfeaturepartitions)
+    output.flush()
+
+    if (input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+
+    val Xhandle = new MatrixHandle(input.readInt())
+
+    return Xhandle
+  }
+
+  def LSQR(A: MatrixHandle, B: MatrixHandle, tolerance: Double, maxIters: Int) : MatrixHandle = {
+    output.writeInt(0x10)
+    output.writeInt(A.id)
+    output.writeInt(B.id)
+    output.writeDouble(tolerance)
+    output.writeInt(maxIters)
+    output.flush()
+
+    if (input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+
+    val Xhandle = new MatrixHandle(input.readInt())
+
+    return Xhandle
   }
 
   def truncatedSVD(mat: MatrixHandle, k: Int) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
@@ -434,6 +500,10 @@ class AlContext(driver: DriverClient) extends Serializable {
 }
 
 class Alchemist(val mysc: SparkContext) {
+  import LossType._
+  import RegularizerType._
+  import KernelType._
+
   System.err.println("launching alchemist")
   val sc : SparkContext = mysc
 
@@ -467,6 +537,24 @@ class Alchemist(val mysc: SparkContext) {
   def kMeans(mat: AlMatrix, k: Int, maxIters: Int, threshold: Double) : Tuple3[AlMatrix, AlMatrix, Int] = {
     val (handleCenters, handleAssignments, numIters) = client.kMeans(mat.handle, k, maxIters)
     (new AlMatrix(this, handleCenters), new AlMatrix(this, handleAssignments), numIters)
+  }
+
+  def LSQR(A: AlMatrix, B: AlMatrix, tolerance: Double = 1e-14, maxIters: Int = 100) : AlMatrix = {
+    val handleX  = client.LSQR(A.handle, B.handle, tolerance, maxIters)
+    new AlMatrix(this, handleX)
+  }
+
+  def SkylarkADMMKRR(featureMat: AlMatrix, targetMat: AlMatrix, 
+    regression: Boolean, lossfunction: LossType, regularizer: RegularizerType,
+    kernel: KernelType, kernelparam : Double, kernelparam2: Double,
+    kernelparam3: Double, lambda: Double, maxiter: Int, tolerance: Double,
+    rho: Double, seed: Int, randomfeatures: Int, numfeaturepartitions: Int) : 
+  AlMatrix = {
+    val Xhandle = client.skylarkADMMKRR(featureMat.handle, targetMat.handle,
+      regression, lossfunction.id, regularizer.id, kernel.id, kernelparam,
+      kernelparam2, kernelparam3, lambda, maxiter, tolerance, rho, seed,
+      randomfeatures, numfeaturepartitions)
+    new AlMatrix(this, Xhandle)
   }
 
   def truncatedSVD(mat: AlMatrix, k: Int) : Tuple3[AlMatrix, AlMatrix, AlMatrix] = {

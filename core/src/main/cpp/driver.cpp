@@ -44,6 +44,7 @@ struct Driver {
   void handle_kmeansClustering();
   void handle_truncatedSVD();
   void handle_SkylarkKRR();
+  void handle_SkylarkLSQR();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
@@ -145,6 +146,11 @@ int Driver::main() {
 
       case 0x9:
         handle_SkylarkKRR();
+        break;
+
+      case 0x10:
+        handle_SkylarkLSQR();
+        break;
 
       default:
         log->error("Unknown typeCode {#x}", typeCode);
@@ -215,7 +221,7 @@ void Driver::handle_computeLowrankSVD() {
 void Driver::handle_SkylarkKRR() {
     MatrixHandle featureMat{input.readInt()};
     MatrixHandle targetMat{input.readInt()};
-    uint32_t regression = input.readInt();
+    bool regression = input.readInt() > 0? true : false;
     uint32_t lossfunction = input.readInt();
     uint32_t regularizer = input.readInt();
     uint32_t kernel = input.readInt();
@@ -239,9 +245,36 @@ void Driver::handle_SkylarkKRR() {
         numfeaturepartitions);
     issue(cmd);
 
+    world.barrier(); // wait for it to finish
     log->info("Finished calling Skylark's ADMM Kernel solver for this KRR problem");
     output.writeInt(0x1);
     output.flush();
+}
+
+void Driver::handle_SkylarkLSQR() {
+  MatrixHandle A{input.readInt()};
+  MatrixHandle B{input.readInt()};
+  double tolerance = input.readDouble();
+  uint32_t iter_lim = input.readInt();
+
+  auto p = matrices[A].numCols;
+  auto m = matrices[B].numCols;
+  MatrixHandle X = registerMatrix(p, m);
+
+  log->info("Starting Skylark's LSQR solver on feature matrix {} and target matrix {}", A, B);
+  log->info("Tolerance: {}", tolerance);
+  log->info("Iteration Limit: {}", iter_lim);
+  log->info("Result will be a {}-by-{} matrix", p, m);
+
+  SkylarkLSQRSolverCommand cmd(A, B, X, tolerance, iter_lim);
+  issue(cmd);
+
+  world.barrier(); // wait for it to finish
+  log->info("Finished call to Skylark's LSQR solver");
+  output.writeInt(0x1);
+  output.writeInt(X.id);
+  output.flush();
+  log->info("Finished LSQR computation");
 }
 
 // TODO: the cluster centers should be stored locally on driver and reduced/broadcasted. the current
@@ -512,7 +545,9 @@ void Driver::handle_matrixMul() {
 
 void Driver::handle_matrixDims() {
   MatrixHandle matrixHandle{input.readInt()};
+  log->info("Looking up dimensions for matrix {}", matrixHandle.id);
   auto info = matrices[matrixHandle];
+  log->info("Returning dimensions for matrix {}: {}-by-{}", matrixHandle.id, info.numRows, info.numCols);
   output.writeInt(0x1);
   output.writeLong(info.numRows);
   output.writeLong(info.numCols);

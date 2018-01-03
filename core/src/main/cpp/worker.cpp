@@ -165,26 +165,65 @@ void kmeansParallelInit(Worker * self, DistMatrix const * dataMat,
   mpi::broadcast(self->world, clusterCenters.data(), clusterCenters.rows()*d, 0);
 }
 
+El::DistMatrix<double> * relayout(const El::DistMatrix<double, El::MD, El::STAR> & matIn, const El::Grid & grid) {
+  El::DistMatrix<double> * matOut = new El::DistMatrix<double>(matIn.Height(), matIn.Width(), grid);
+  El::Copy(matIn, *matOut);
+  return matOut;
+}
+
+El::DistMatrix<double, El::MD, El::STAR> * delayout(const El::DistMatrix<double> & matIn, const El::Grid & grid) {
+  auto matOut = new El::DistMatrix<double, El::MD, El::STAR>(matIn.Height(), matIn.Width(), grid);
+  El::Copy(matIn, *matOut);
+  return matOut;
+}
+
+// NB: it seems that Skylark's LSQR routine cannot work with MD, STAR matrices (get templating errors from their GEMM routine),
+// so need to relayout the input and output matrices
+void SkylarkLSQRSolverCommand::run(Worker *self) const {
+  auto log = self->log;
+  El::DistMatrix<double, El::MD, El::STAR> * Amat = (El::DistMatrix<double, El::MD, El::STAR> *) self->matrices[A].get();
+  El::DistMatrix<double, El::MD, El::STAR> * Bmat = (El::DistMatrix<double, El::MD, El::STAR> *) self->matrices[B].get();
+  El::DistMatrix<double> * Xmat = new El::DistMatrix<double>(Amat->Width(), Bmat->Width(), self->grid);
+
+  log->info("Relaying out lhs and rhs for LSQR");
+  auto startRelayout = std::chrono::system_clock::now();
+  El::DistMatrix<double> * Arelayedout = relayout(*Amat, self->grid);
+  El::DistMatrix<double> * Brelayedout = relayout(*Bmat, self->grid);
+  std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - startRelayout);
+  log->info("Relayout took {} seconds", relayoutDuration.count()/1000.0);
+
+  auto params = skylark::algorithms::krylov_iter_params_t(tolerance, iter_lim);
+  skylark::algorithms::LSQR(*Arelayedout, *Brelayedout, *Xmat, params);
+  Arelayedout->EmptyData();
+  Brelayedout->EmptyData();
+  El::DistMatrix<double, El::MD, El::STAR> * Xrelayedout = delayout(*Xmat, self->grid);
+  Xmat->EmptyData();
+
+  log->info("LSQR result has dimension {}-by-{}", Xrelayedout->Height(), Xrelayedout->Width());
+  ENSURE(self->matrices.insert(std::make_pair(X, std::unique_ptr<DistMatrix>(Xrelayedout))).second);
+  self->world.barrier();
+}
+
 void SkylarkKernelSolverCommand::run(Worker *self) const {
+   // for now only handle some of the options, otherwise use SKYLARK defaults
+  char ** emptystrarray;
+  hilbert_options_t options(0, emptystrarray, self->peers.size());
 
-    // for now only handle some of the options, otherwise use SKYLARK defaults
-    char ** emptystrarray;
-    hilbert_options_t options(0, emptystrarray, self->peers.size());
+  options.regression = true;
+  options.kernel = K_GAUSSIAN;
+  options.kernelparam = kernelparam;
+  options.kernelparam2 = kernelparam2;
+  options.kernelparam3 = kernelparam3;
+  options.lambda = lambda;
+  options.seed = seed;
+  options.randomfeatures = randomfeatures;
 
-    options.regression = true;
-    options.kernel = K_GAUSSIAN;
-    options.kernelparam = kernelparam;
-    options.kernelparam2 = kernelparam2;
-    options.kernelparam3 = kernelparam3;
-    options.lambda = lambda;
-    options.seed = seed;
-    options.randomfeatures = randomfeatures;
-
-    skylark::base::context_t context(options.seed);
-    El::Matrix<double> localX = self->matrices[features].get()->LockedMatrix();
-    El::Matrix<double> localY = self->matrices[features].get()->LockedMatrix();
-    skylark::ml::LargeScaleKernelLearning(self->peers, localX, 
-        localY, context, options);
+  skylark::base::context_t context(options.seed);
+  El::Matrix<double> localX = self->matrices[features].get()->LockedMatrix();
+  El::Matrix<double> localY = self->matrices[features].get()->LockedMatrix();
+  skylark::ml::LargeScaleKernelLearning(self->peers, localX, 
+      localY, context, options);
+  self->world.barrier();
 }
 
 // TODO: add seed as argument (make sure different workers do different things)
@@ -198,7 +237,7 @@ void KMeansCommand::run(Worker *self) const {
   // relayout matrix if needed so that it is in row-partitioned format
   // cf http://libelemental.org/pub/slides/ICS13.pdf slide 19 for the cost of redistribution
   auto distData = origDataMat->DistData();
-  DistMatrix * dataMat = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, d, self->grid);
+  DistMatrix * dataMat = new El::DistMatrix<double, El::MD, El::STAR>(n, d, self->grid);
   if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
    dataMat = origDataMat;
   } else {
@@ -209,8 +248,8 @@ void KMeansCommand::run(Worker *self) const {
   }
 
   // TODO: store these as local matrices on the driver
-  DistMatrix * centers = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(numCenters, d, self->grid);
-  DistMatrix * assignments = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, 1, self->grid);
+  DistMatrix * centers = new El::DistMatrix<double, El::MD, El::STAR>(numCenters, d, self->grid);
+  DistMatrix * assignments = new El::DistMatrix<double, El::MD, El::STAR>(n, 1, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(centersHandle, std::unique_ptr<DistMatrix>(centers))).second);
   ENSURE(self->matrices.insert(std::make_pair(assignmentsHandle, std::unique_ptr<DistMatrix>(assignments))).second);
 
@@ -336,7 +375,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
 
   // Relayout matrix so it is row-partitioned
   DistMatrix * workingMat;
-  std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(m, n, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
+  std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::MD, El::STAR>(m, n, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
   auto distData = A->DistData();
   if (distData.colDist == El::MD && distData.rowDist == El::STAR) {
     workingMat = A;
@@ -392,10 +431,10 @@ void TruncatedSVDCommand::run(Worker *self) const {
 
       // let U,S,V also be stored as row-distributed, otherwise A will be relaid out when doing the 
       // matrix multiply, which will increase the memory usage
-      DistMatrix * U = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(m, nconv, self->grid);
-      DistMatrix * S = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(nconv, 1, self->grid);
-      DistMatrix * Sinv = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(nconv, 1, self->grid);
-      DistMatrix * V = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(n, nconv, self->grid);
+      DistMatrix * U = new El::DistMatrix<double, El::MD, El::STAR>(m, nconv, self->grid);
+      DistMatrix * S = new El::DistMatrix<double, El::MD, El::STAR>(nconv, 1, self->grid);
+      DistMatrix * Sinv = new El::DistMatrix<double, El::MD, El::STAR>(nconv, 1, self->grid);
+      DistMatrix * V = new El::DistMatrix<double, El::MD, El::STAR>(n, nconv, self->grid);
 
       ENSURE(self->matrices.insert(std::make_pair(UHandle, std::unique_ptr<DistMatrix>(U))).second);
       ENSURE(self->matrices.insert(std::make_pair(SHandle, std::unique_ptr<DistMatrix>(S))).second);
@@ -435,7 +474,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
 void TransposeCommand::run(Worker *self) const {
   auto m = self->matrices[origMat]->Height();
   auto n = self->matrices[origMat]->Width();
-  DistMatrix * transposeA = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(n, m, self->grid);
+  DistMatrix * transposeA = new El::DistMatrix<double, El::MD, El::STAR>(n, m, self->grid);
   El::Zero(*transposeA);
 
   ENSURE(self->matrices.insert(std::make_pair(transposeMat, std::unique_ptr<DistMatrix>(transposeA))).second);
@@ -449,9 +488,9 @@ void ThinSVDCommand::run(Worker *self) const {
   auto m = self->matrices[mat]->Height();
   auto n = self->matrices[mat]->Width();
   auto k = std::min(m, n);
-  DistMatrix * U = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(m, k, self->grid);
-  DistMatrix * singvals = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(k, k, self->grid);
-  DistMatrix * V = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(n, k, self->grid);
+  DistMatrix * U = new El::DistMatrix<double, El::MD, El::STAR>(m, k, self->grid);
+  DistMatrix * singvals = new El::DistMatrix<double, El::MD, El::STAR>(k, k, self->grid);
+  DistMatrix * V = new El::DistMatrix<double, El::MD, El::STAR>(n, k, self->grid);
   El::Zero(*U);
   El::Zero(*V);
   El::Zero(*singvals);
@@ -460,7 +499,7 @@ void ThinSVDCommand::run(Worker *self) const {
   ENSURE(self->matrices.insert(std::make_pair(Shandle, std::unique_ptr<DistMatrix>(singvals))).second);
   ENSURE(self->matrices.insert(std::make_pair(Vhandle, std::unique_ptr<DistMatrix>(V))).second);
 
-  DistMatrix * Acopy = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(m, n, self->grid); // looking at source code for SVD, seems that DistMatrix Acopy(A) might generate copy rather than just copy metadata and risk clobbering
+  DistMatrix * Acopy = new El::DistMatrix<double, El::MD, El::STAR>(m, n, self->grid); // looking at source code for SVD, seems that DistMatrix Acopy(A) might generate copy rather than just copy metadata and risk clobbering
   El::Copy(*self->matrices[mat], *Acopy);
   El::SVD(*Acopy, *U, *singvals, *V);
   std::cerr << format("%s: singvals is %s by %s\n") % self->world.rank() % singvals->Height() % singvals->Width();
@@ -470,7 +509,7 @@ void ThinSVDCommand::run(Worker *self) const {
 void MatrixMulCommand::run(Worker *self) const {
   auto m = self->matrices[inputA]->Height();
   auto n = self->matrices[inputB]->Width();
-  DistMatrix * matrix = new El::DistMatrix<double, El::MD, El::STAR, El::BLOCK>(m, n, self->grid);
+  DistMatrix * matrix = new El::DistMatrix<double, El::MD, El::STAR>(m, n, self->grid);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
   //El::Display(*self->matrices[inputA], "A:");
@@ -507,7 +546,7 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
 void NewMatrixCommand::run(Worker *self) const {
   auto handle = info.handle;
   self->log->info("Creating new distributed matrix");
-  DistMatrix *matrix = new El::DistMatrix<double, El::MD, El::STAR, El::ELEMENT>(info.numRows, info.numCols, self->grid);
+  DistMatrix *matrix = new El::DistMatrix<double, El::MD, El::STAR>(info.numRows, info.numCols, self->grid);
   Zero(*matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   self->log->info("Created new distributed matrix");
@@ -893,6 +932,7 @@ int Worker::main() {
   sinks.push_back(logfile_sink);
   log = std::make_shared<spdlog::logger>( str(format("worker-%d") % world.rank()),
       std::begin(sinks), std::end(sinks));
+  log->flush_on(spdlog::level::info);
 
   log->info("Started worker");
   log->info("Max number of OpenMP threads: {}", omp_get_max_threads());

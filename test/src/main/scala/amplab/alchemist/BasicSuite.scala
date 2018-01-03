@@ -20,7 +20,63 @@ object BasicSuite {
         case "SVD" => testSVD(args.tail)
         case "KMEANS" => testKMeans(args.tail)
         case "MATMUL" => testMatMul(args.tail)
+        case "LSQR" => testLSQR(args.tail)
+        case "ADMMKRR" => testADMMKRR(args.tail)
     }
+  }
+
+  def testADMMKRR( args: Array[String] ): Unit = {
+  }
+
+  def testLSQR( args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName("Alchemist LSQR Test")
+    val sc = new SparkContext(conf)
+  
+    System.err.println("test: creating alchemist")
+    val al = new Alchemist(sc)
+    System.err.println("test: done creating alchemist")
+
+    var n = args(0).toInt // rows
+    var p = args(1).toInt // columns
+    var m = args(2).toInt // number of rhs
+    var maxIters = 100
+    var threshold = 1e-14
+    var partitions = if (args(3).toInt > 0) args(3).toInt else sc.defaultParallelism
+    System.err.println(s"using ${partitions} parallelism for the rdds") 
+
+    // generate system matrix
+    val rows = RandomRDDs.uniformVectorRDD(sc, n, p, partitions);
+    rows.cache()
+    val Ardd = new IndexedRowMatrix(rows.zipWithIndex.map(x => new IndexedRow(x._2, x._1)))
+
+    // create right hand sides
+    val dm = BDM.rand[Double](p, m) 
+    val Xstar = new DenseMatrix(dm.rows, dm.cols, dm.data, dm.isTranspose)
+    val Brdd = Ardd.multiply(Xstar)
+
+    var sendStart = ticks()
+    val alMatA = AlMatrix(al, Ardd)
+    val alMatB = AlMatrix(al, Brdd)
+    var sendEnd = ticks()
+    var computeStart = sendEnd
+    val alMatX = al.LSQR(alMatA, alMatB)
+    var computeEnd = ticks()
+    var receiveStart = computeEnd
+    var solXrdd = alMatX.getIndexedRowMatrix()
+    var receiveEnd = ticks()
+
+    val solXmat = BDM(solXrdd.rows.collect().sortBy(_.index).map(_.vector.toArray):_*)
+    val solXrddnew = new DenseMatrix(dm.rows, dm.cols, dm.data, dm.isTranspose)
+    val Brddnew = Ardd.multiply(solXrddnew)
+    val truerows = Brdd.rows.map(pair => (pair.index, new BDV(pair.vector.toArray)))
+    val predictedrows = Brddnew.rows.map(pair => (pair.index, new BDV(pair.vector.toArray)))
+    val frobnorm = truerows.union(predictedrows).reduceByKey(_ - _).map(pair => scala.math.pow(norm(pair._2, 2), 2)).collect().sum
+
+    System.err.println(s"Alchemist timing: send=${(sendEnd-sendStart)/1000.0}, compute=${(computeEnd-computeStart)/1000.0}, receive=${(receiveEnd - receiveStart)/1000.0}")
+    System.err.println(s"Residual error: ${frobnorm}")
+
+    al.stop
+    sc.stop
   }
 
     def testKMeans(args: Array[String]): Unit = {
