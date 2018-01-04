@@ -209,6 +209,8 @@ void SkylarkLSQRSolverCommand::run(Worker *self) const {
 // The call to the ADMM solver follows  the template of the LargeScaleKernelLearning function in hilbert.hpp
 void SkylarkKernelSolverCommand::run(Worker *self) const {
 
+  self->log->info("Setting up solver options");
+
   // set some options that aren't currently passed in as arguments
   bool usefast = false;
   SequenceType seqtype = LEAPED_HALTON;
@@ -218,8 +220,11 @@ void SkylarkKernelSolverCommand::run(Worker *self) const {
   skylark::base::context_t context(seed);
   typedef El::Matrix<double> InputType;
 
-  El::Matrix<double> localX = self->matrices[features].get()->LockedMatrix();
-  El::Matrix<double> localY = self->matrices[features].get()->LockedMatrix();
+  El::Matrix<double> localX;
+  El::Matrix<double> localY;
+
+  El::Transpose(self->matrices[features].get()->LockedMatrix(), localX);
+  El::Transpose(self->matrices[targets].get()->LockedMatrix(), localY);
 
   // validation data
   El::Matrix<double> localXv;
@@ -237,6 +242,7 @@ void SkylarkKernelSolverCommand::run(Worker *self) const {
     shift = true;
   }
 
+  self->log->info("Setting up Skylark ADMM solver");
 
   skylark::algorithms::loss_t<double> *loss = NULL;
   switch(lossfunction) {
@@ -271,19 +277,22 @@ void SkylarkKernelSolverCommand::run(Worker *self) const {
 						break;
 			}
 
+  self->log->info("Initializing solver");
+
   BlockADMMSolver<InputType> *Solver = NULL;
     int features = 0;
     switch(kernel) {
     case K_LINEAR:
         features =
             (randomfeatures == 0 ? dimensions : randomfeatures);
-        if (randomfeatures == 0)
+        if (randomfeatures == 0) {
             Solver =
                 new BlockADMMSolver<InputType>(loss,
                     reg,
                     lambda,
                     dimensions,
                     numfeaturepartitions);
+          }
         else
             Solver =
                 new BlockADMMSolver<InputType>(context,
@@ -431,6 +440,8 @@ void SkylarkKernelSolverCommand::run(Worker *self) const {
 
     }
 
+    self->log->info("Solver initialized");
+
     // Set parameters
     Solver->set_rho(rho);
     Solver->set_maxiter(maxiter);
@@ -449,67 +460,12 @@ void SkylarkKernelSolverCommand::run(Worker *self) const {
     if (Xdist->IsLocalRow(row)) 
       for (uint32_t col = 0; col < Xdist->Width(); col++)
         Xdist->Set(row, col, X.Get(row,col));
+
   ENSURE(self->matrices.insert(std::make_pair(coefs, std::unique_ptr<DistMatrix>(Xdist))).second);
+  self->log->info("Stored the coefficient matrix as matrix {}", coefs);
 
   self->world.barrier();
 }
-
-// // Note if we do regression, we can only have one rhs
-// // The call to the ADMM solver follows  the template of the LargeScaleKernelLearning function in hilbert.hpp
-// void SkylarkKernelSolverCommand::run(Worker *self) const {
-//    // for now only handle some of the options, otherwise use SKYLARK defaults
-//   char * arrayOfOptions[2] = {"--modelfile", "blah"};
-//   self->log->info("Creating solver options");
-//   hilbert_options_t options(2, arrayOfOptions, self->peers.size());
-// 
-//   options.regression = true;
-//   options.kernel = K_GAUSSIAN;
-//   options.kernelparam = kernelparam;
-//   options.kernelparam2 = kernelparam2;
-//   options.kernelparam3 = kernelparam3;
-//   options.lambda = lambda;
-//   options.seed = seed;
-//   options.randomfeatures = randomfeatures;
-// 
-//   self->log->info("Creating Skylark context");
-//   skylark::base::context_t context(options.seed);
-// 
-//   El::Matrix<double> localX = self->matrices[features].get()->LockedMatrix();
-//   El::Matrix<double> localY = self->matrices[features].get()->LockedMatrix();
-// 
-//   // validation data
-//   El::Matrix<double> localXv;
-//   El::Matrix<double> localYv;
-// 
-//   // don't know what the variable targets is used for
-//   // shift indicates whether validation data should also be shifted
-//   auto dimensions = skylark::base::Height(localX);
-//   auto targets = options.regression ? 1 : GetNumTargets(self->peers, localY);
-//   bool shift = false;
-// 
-//   if (!options.regression && options.lossfunction == LOGISTIC && targets == 1) {
-//     ShiftForLogistic(localY);
-//     targets = 2;
-//     shift = true;
-//   }
-// 
-//   self->log->info("Creating solver");
-// 
-//   BlockADMMSolver<El::Matrix<double>> * Solver = GetSolver<El::Matrix<double>>(context, options, dimensions);
-//   self->log->info("Training solver");
-//   skylark::ml::hilbert_model_t * model = Solver->train(localX, localY, localXv, localYv, options.regression, self->peers);
-//   El::Matrix<double> X = model->get_coef();
-// 
-//   // Convert the model coefficients to a distributed matrix and store in the matrix table
-//   DistMatrix * Xdist = new El::DistMatrix<double, El::MD, El::STAR>(X.Height(), X.Width(), self->grid);
-//   for(uint32_t row = 0; row < Xdist->Height(); row++) 
-//     if (Xdist->IsLocalRow(row)) 
-//       for (uint32_t col = 0; col < Xdist->Width(); col++)
-//         Xdist->Set(row, col, X.Get(row,col));
-//   ENSURE(self->matrices.insert(std::make_pair(coefs, std::unique_ptr<DistMatrix>(Xdist))).second);
-// 
-//   self->world.barrier();
-// }
 
 // TODO: add seed as argument (make sure different workers do different things)
 void KMeansCommand::run(Worker *self) const {
@@ -806,8 +762,17 @@ void MatrixMulCommand::run(Worker *self) const {
 // TODO: should send back blocks of rows instead of rows? maybe conversion on other side is cheaper?
 void  MatrixGetRowsCommand::run(Worker * self) const {
   uint64_t numRowsFromMe = std::count(layout.begin(), layout.end(), self->id);
+  self->log->info("Sending over {} rows from matrix {}", numRowsFromMe, handle);
+  auto search = self->matrices.find(handle);
+  if (search != self->matrices.end()) {
+    self->log->info("Found it!");
+  } else {
+    self->log->info("Not found it!");
+  }
   auto matrix = self->matrices[handle].get();
   uint64_t numCols = matrix->Width();
+
+  self->log->info("sending over {} rows with {} cols", numRowsFromMe, numCols);
 
   std::vector<uint64_t> localRowIndices; // maps rows in the matrix to rows in the local storage
   std::vector<double> localData(numCols * numRowsFromMe);
@@ -823,6 +788,7 @@ void  MatrixGetRowsCommand::run(Worker * self) const {
     }
   }
   matrix->ProcessPullQueue(&localData[0]);
+  self->log->info("pulled the {} rows needed to this rank, now sending them over", numRowsFromMe);
 
   self->sendMatrixRows(handle, matrix->Width(), layout, localRowIndices, localData);
   self->world.barrier();

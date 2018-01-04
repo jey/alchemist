@@ -185,7 +185,7 @@ struct SkylarkKernelSolverCommand : Command {
         double kernelparam, double kernelparam2, double kernelparam3, 
         double lambda, uint32_t maxiter, double tolerance, double rho, 
         uint32_t seed, uint32_t randomfeatures, uint32_t numfeaturepartitions) : 
-        features(features), targets(targets), regression(regression),
+        features(features), targets(targets), coefs(coefs), regression(regression),
         lossfunction(lossfunction), regularizer(regularizer), kernel(kernel),
         kernelparam(kernelparam), kernelparam2(kernelparam2), kernelparam3(kernelparam3),
         lambda(lambda), maxiter(maxiter), tolerance(tolerance), rho(rho),

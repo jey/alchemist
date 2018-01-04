@@ -252,7 +252,9 @@ void Driver::handle_SkylarkKRR() {
     world.barrier(); // wait for it to finish
     log->info("Finished calling Skylark's ADMM Kernel solver for this KRR problem");
     output.writeInt(0x1);
+    output.writeInt(coefs.id);
     output.flush();
+    log->info("Finished KRR solve, stored coeffcient matrix as {}", coefs);
 }
 
 void Driver::handle_SkylarkLSQR() {
@@ -600,8 +602,10 @@ void Driver::handle_newMatrix() {
   // tell spark which worker expects each row
   std::vector<int> rowWorkerAssignments(numRows, 0);
   std::vector<uint64_t> rowsOnWorker;
+  std::vector<uint32_t> numRowsOnEachWorker(world.size() -1, 0);
   for(int workerIdx = 1; workerIdx < world.size(); workerIdx++) {
     world.recv(workerIdx, 0, rowsOnWorker);
+    numRowsOnEachWorker[workerIdx - 1] = rowsOnWorker.size();
     world.barrier();
     for(auto rowIdx: rowsOnWorker) {
       rowWorkerAssignments[rowIdx] = workerIdx;
@@ -616,6 +620,9 @@ void Driver::handle_newMatrix() {
     ALCHEMIST_TRACE(ss << workerIdx << ' ');
   }
   ALCHEMIST_TRACE(log->info(ss.str().c_str()));
+  
+  for(uint32_t workerIdx = 1; workerIdx < world.size(); workerIdx++)
+    log->info("Worker with rank {} will receive {} rows", workerIdx, numRowsOnEachWorker[workerIdx-1]);
 
   output.flush();
 

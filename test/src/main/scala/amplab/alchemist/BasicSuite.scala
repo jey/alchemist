@@ -84,7 +84,15 @@ object BasicSuite {
     var solXrdd = alMatX.getIndexedRowMatrix()
     var receiveEnd = ticks()
 
+    val solXmat = BDM(solXrdd.rows.collect().sortBy(_.index).map(_.vector.toArray):_*)
+    val solXrddnew = new DenseMatrix(dm.rows, dm.cols, dm.data, dm.isTranspose)
+    val Brddnew = Ardd.multiply(solXrddnew)
+    val truerows = Brdd.rows.map(pair => (pair.index, new BDV(pair.vector.toArray)))
+    val predictedrows = Brddnew.rows.map(pair => (pair.index, new BDV(pair.vector.toArray)))
+    val frobnorm = truerows.union(predictedrows).reduceByKey(_ - _).map(pair => scala.math.pow(norm(pair._2, 2), 2)).collect().sum
+
     System.err.println(s"Alchemist timing: send=${(sendEnd-sendStart)/1000.0}, compute=${(computeEnd-computeStart)/1000.0}, receive=${(receiveEnd - receiveStart)/1000.0}")
+    System.err.println(s"Residual error: ${frobnorm}")
 
     al.stop
     sc.stop

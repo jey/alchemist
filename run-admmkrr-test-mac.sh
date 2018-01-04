@@ -1,7 +1,7 @@
 #!/bin/bash
 # Assumes that spark-submit is in your PATH
 
-export NUM_ALCHEMIST_RANKS=4
+export NUM_ALCHEMIST_RANKS=3
 export TMPDIR=/tmp
 
 method=ADMMKRR
@@ -19,7 +19,7 @@ partitions=0
 
 spark-submit --verbose\
   --master local[*] \
-  --driver-memory 3G\
+  --driver-memory 2G\
   --class amplab.alchemist.BasicSuite\
   test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $method $n $p $m $partitions 2>&1 | tee test.log
 exit
