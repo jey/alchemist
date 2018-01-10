@@ -283,6 +283,24 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return Xhandle
   }
 
+  def factorizedCGKRR(featureMat: MatrixHandle, targetMat: MatrixHandle, 
+    lambda: Double, maxIters: Int) : MatrixHandle = {
+    output.writeInt(0x11)
+    output.writeInt(featureMat.id)
+    output.writeInt(targetMat.id)
+    output.writeDouble(lambda)
+    output.writeInt(maxIters)
+    output.flush()
+
+    if (input.readInt() != 0x1) {
+      throw new ProtocolError()
+    }
+
+    val Xhandle = new MatrixHandle(input.readInt())
+
+    return Xhandle
+  }
+
   def truncatedSVD(mat: MatrixHandle, k: Int) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
     output.writeInt(0x8)
     output.writeInt(mat.id)
@@ -555,6 +573,13 @@ class Alchemist(val mysc: SparkContext) {
       regression, lossfunction.id, regularizer.id, kernel.id, kernelparam,
       kernelparam2, kernelparam3, lambda, maxiter, tolerance, rho, seed,
       randomfeatures, numfeaturepartitions)
+    new AlMatrix(this, Xhandle)
+  }
+
+  def factorizedCGKRR(featureMat: AlMatrix, targetMat: AlMatrix, 
+    lambda: Double, maxIter: Int) : AlMatrix = {
+    val Xhandle = client.factorizedCGKRR(featureMat.handle, targetMat.handle,
+      lambda, maxIter)
     new AlMatrix(this, Xhandle)
   }
 

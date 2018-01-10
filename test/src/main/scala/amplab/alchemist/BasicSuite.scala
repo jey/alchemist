@@ -41,7 +41,8 @@ object BasicSuite {
     var n = args(0).toInt // rows
     var p = args(1).toInt // columns
     var m = args(2).toInt // number of targets
-    var partitions = if (args(3).toInt > 0) args(3).toInt else sc.defaultParallelism
+    var sigma = args(3).toDouble // std of noise added to each target
+    var partitions = if (args(4).toInt > 0) args(4).toInt else sc.defaultParallelism
     System.err.println(s"using ${partitions} parallelism for the rdds") 
 
     // arguments to skylark's solver

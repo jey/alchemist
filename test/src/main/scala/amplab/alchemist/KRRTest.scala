@@ -24,7 +24,7 @@ import utils._
 
 object AlchemistRFMClassification {
 
-    def main(args: Array[String]) {
+    def main(args: Array[String]) : Unit = {
         // Parse parameters from command line
         val filepath: String = args(0)
         val numFeatures: Int = args(1).toInt
@@ -38,11 +38,18 @@ object AlchemistRFMClassification {
         val spark = (SparkSession.builder()
                         .appName("Test Alchemist Random Feature Regression")
                         .getOrCreate())
-        val sc: SparkContext = spark.SparkContext
+        val sc: SparkContext = spark.sparkContext
         sc.setLogLevel("ERROR")
         var t2 = System.nanoTime()
 
-        println(s"Time cost of starting Spark session is ${(t2 - t1) * 1.0E-9} sec")
+        println(s"Time to start Spark session was ${(t2 - t1) * 1.0E-9} sec")
+        println(" ")
+
+        // Launch Alchemist
+        t1 = System.nanoTime()
+        val al = new Alchemist(sc)
+        t2 = System.nanoTime()
+        println(s"Took ${(t2 -t1)*1.0E-9} seconds to launch Alchemist")
         println(" ")
 
         // Load data and perform RFM
@@ -56,8 +63,8 @@ object AlchemistRFMClassification {
         // two IndexedRowMatrix RDDS for the LHS and the RHS
         var t3 = System.nanoTime()
         val rddWithIndices: RDD[(Int, (Array[Double], Array[Double]))] = RDDToIndexedRDD(rddOneHot)
-        val rddA : RDD[IndexedRow] = rddWithIndices.map( case (index, pair) => new IndexedRow(index, pair._2) ).cache()
-        val rddB : RDD[IndexedRow] = rddWithIndices.map( case (index, pair) => new IndexedRow(index, pair._1) ).cache()
+        val rddA : RDD[IndexedRow] = rddWithIndices.map{ case (index, pair) => new IndexedRow(index, new DenseVector(pair._2)) }.cache()
+        val rddB : RDD[IndexedRow] = rddWithIndices.map{ case (index, pair) => new IndexedRow(index, new DenseVector(pair._1)) }.cache()
         val matA : IndexedRowMatrix = new IndexedRowMatrix(rddA, rddA.count(), numFeatures)
         val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, rddB.count(), numClass)
         var t4 = System.nanoTime()
@@ -100,7 +107,7 @@ object AlchemistRFMClassification {
       val t1 = System.nanoTime()
       val df = spark.read.format("libsvm").load(filepath)
       val rdd: RDD[(Int, Array[Double])] = df.rdd
-                        .map(pair => pair(0).toString.toFloat.toInt, Vectors.parse(pair(1).toString).toArray))
+                        .map(pair => (pair(0).toString.toFloat.toInt, Vectors.parse(pair(1).toString).toArray))
                         .persist()
       val n = rdd.count()
       val d = rdd.take(1)(0)._2.size
@@ -121,7 +128,7 @@ object AlchemistRFMClassification {
 
         // random feature mapping
         val t1 = System.nanoTime()
-        val rfmRdd = RDD[(Int, Array[Double])] = rdd2.mapPartitions(Kernel.rbfRfm(_, numFeatures, sigma))
+        val rfmRdd : RDD[(Int, Array[Double])] = rdd2.mapPartitions(Kernel.rbfRfm(_, numFeatures, sigma))
                                                         .map(pair => (pair._1.toInt, pair._2))
                                                         .persist()
         val s = rfmRdd.take(1)(0)._2.size
@@ -139,15 +146,15 @@ object AlchemistRFMClassification {
     }
 
     // arbitrarily indices the rows in an rdd from zero
-    def RDDToIndexedRDD( inRdd: RDD[T] ) : RDD[(Int, T)] = {
-        val rand = scala.util.Random
+    def RDDToIndexedRDD[T]( inRdd: RDD[T] ) : RDD[(Int, T)] = {
+        val rand = new scala.util.Random()
         val seedBase = rand.nextInt()
-        val prioritizedElements = inRdd.mapPartitionsWithIndex{
+        val prioritizedElements = inRdd.mapPartitionsWithIndex(
             (index, iterator) => {
-                val rand = scala.util.Random(index + seedBase)
+                val rand = new scala.util.Random(index + seedBase)
                 iterator.map(x => (rand.nextDouble, x))
             }, true
-        }
+        )
         val sortedPriorities = prioritizedElements.map(pair => pair._1).collect().sorted.zipWithIndex.toMap
         prioritizedElements.map(pair => (sortedPriorities(pair._1), pair._2))
     }

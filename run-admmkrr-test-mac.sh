@@ -11,6 +11,7 @@ method=ADMMKRR
 n=125000 
 p=1000
 m=4
+sigma=.1
 
 # seems like if the partitions are too large, Spark will hang, so go for 2GB/partition
 # 0 tells Spark to use default parallelism
@@ -21,5 +22,5 @@ spark-submit --verbose\
   --master local[*] \
   --driver-memory 2G\
   --class amplab.alchemist.BasicSuite\
-  test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $method $n $p $m $partitions 2>&1 | tee test.log
+  test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $method $n $p $m $sigma $partitions 2>&1 | tee test.log
 exit
