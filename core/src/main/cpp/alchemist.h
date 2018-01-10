@@ -243,6 +243,31 @@ struct SkylarkLSQRSolverCommand : Command {
   }
 };
 
+struct FactorizedCGSolverCommand : Command {
+  MatrixHandle A;
+  MatrixHandle B;
+  MatrixHandle X;
+  double lambda;
+  uint32_t maxIters;
+
+  explicit FactorizedCGSolverCommand() {}
+
+  FactorizedCGSolverCommand(MatrixHandle A, MatrixHandle B, MatrixHandle X, double lambda, uint32_t maxIters):
+    A(A), B(B), X(X), lambda(lambda), maxIters(maxIters) {};
+
+  virtual void run(Worker *self) const;
+
+  template <typename Archive>
+  void serialize(Archive &ar, const unsigned version) {
+    ar & serialization::base_object<Command>(*this);
+    ar & A;
+    ar & B;
+    ar & X;
+    ar & lambda;
+    ar & maxIters;
+  }
+};
+
 struct KMeansCommand : Command {
   MatrixHandle origMat;
   uint32_t numCenters;
@@ -469,5 +494,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::KMeansCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::TruncatedSVDCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkKernelSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkLSQRSolverCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::FactorizedCGSolverCommand);
 
 #endif

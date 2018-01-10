@@ -45,6 +45,7 @@ struct Driver {
   void handle_truncatedSVD();
   void handle_SkylarkKRR();
   void handle_SkylarkLSQR();
+  void handle_FactorizedCGSolver();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
@@ -152,6 +153,10 @@ int Driver::main() {
         handle_SkylarkLSQR();
         break;
 
+      case 0x11:
+        handle_FactorizedCGSolver();
+        break;
+
       default:
         log->error("Unknown typeCode {#x}", typeCode);
         abort();
@@ -217,6 +222,29 @@ void Driver::handle_computeLowrankSVD() {
   output.flush();
 }
 */
+
+void Driver::handle_FactorizedCGSolver() {
+  MatrixHandle featureMat{input.readInt()};
+  MatrixHandle targetMat{input.readInt()};
+  double lambda = input.readDouble();
+  uint32_t maxIters = input.readInt();
+
+  auto numfeatures = matrices[featureMat].numCols;
+  auto numtargets = matrices[targetMat].numCols;
+  MatrixHandle coefs = registerMatrix(numfeatures, numtargets);
+
+  log->info("Starting factorized CG solver on feature matrix {} and target matrix {}", featureMat, targetMat);
+  log->info("lambda={}, maxIters={}", lambda, maxIters);
+
+  FactorizedCGSolverCommand cmd(featureMat, targetMat, coefs, lambda, maxIters);
+  issue(cmd);
+
+  world.barrier(); // wait for it to finish
+  output.writeInt(0x1);
+  output.writeInt(coefs.id);
+  output.flush();
+  log->info("Finished CG solve, stored coefficient matrix as {}", coefs);
+}
 
 void Driver::handle_SkylarkKRR() {
     MatrixHandle featureMat{input.readInt()};

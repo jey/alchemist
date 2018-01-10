@@ -24,4 +24,5 @@ BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::KMeansCommand);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::TruncatedSVDCommand);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::SkylarkKernelSolverCommand);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::SkylarkLSQRSolverCommand);
+BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::FactorizedCGSolverCommand);
 

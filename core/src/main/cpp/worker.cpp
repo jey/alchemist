@@ -13,6 +13,7 @@
 #include <skylark.hpp>
 #include "hilbert.hpp"
 #include "utils.hpp"
+#include "factorizedCG.hpp"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -464,6 +465,32 @@ void SkylarkKernelSolverCommand::run(Worker *self) const {
   ENSURE(self->matrices.insert(std::make_pair(coefs, std::unique_ptr<DistMatrix>(Xdist))).second);
   self->log->info("Stored the coefficient matrix as matrix {}", coefs);
 
+  self->world.barrier();
+}
+
+void FactorizedCGSolverCommand::run(Worker *self) const {
+  auto log = self->log;
+  El::DistMatrix<double, El::MD, El::STAR> * Amat = (El::DistMatrix<double, El::MD, El::STAR> *) self->matrices[A].get();
+  El::DistMatrix<double, El::MD, El::STAR> * Bmat = (El::DistMatrix<double, El::MD, El::STAR> *) self->matrices[B].get();
+  El::DistMatrix<double> * Xmat = new El::DistMatrix<double>(Amat->Width(), Bmat->Width(), self->grid);
+
+  log->info("Relaying out lhs and rhs for LSQR");
+  auto startRelayout = std::chrono::system_clock::now();
+  El::DistMatrix<double> * Arelayedout = relayout(*Amat, self->grid);
+  El::DistMatrix<double> * Brelayedout = relayout(*Bmat, self->grid);
+  std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - startRelayout);
+  log->info("Relayout took {} seconds", relayoutDuration.count()/1000.0);
+
+  auto params = skylark::algorithms::krylov_iter_params_t();
+  params.iter_lim = maxIters;
+  skylark::algorithms::factorizedCG(*Arelayedout, *Brelayedout, *Xmat, lambda, params);
+  Arelayedout->EmptyData();
+  Brelayedout->EmptyData();
+  El::DistMatrix<double, El::MD, El::STAR> * Xrelayedout = delayout(*Xmat, self->grid);
+  Xmat->EmptyData();
+
+  log->info("CG results has dimensions {}-by-{}", Xrelayedout->Height(), Xrelayedout->Width());
+  ENSURE(self->matrices.insert(std::make_pair(X, std::unique_ptr<DistMatrix>(Xrelayedout))).second);
   self->world.barrier();
 }
 
