@@ -17,10 +17,14 @@ set -o verbose
 ALROOT=$PWD
 ALPREFIX=$ALROOT/bins
 
+MAKE_THREADS=16
+
+# Set the following flags to indicate what needs to be installed
+
 WITH_GMP=1
 WITH_EL=1
-WITH_RANDOM123=0
-WITH_SKYLARK=0
+WITH_RANDOM123=1
+WITH_SKYLARK=1
 WITH_ARPACK=1
 WITH_ARPACKPP=1
 WITH_EIGEN=1
@@ -59,7 +63,7 @@ if [ "$WITH_GMP" = 1 ]; then
   tar xfvj gmp-6.1.2.tar.bz2
   cd gmp-6.1.2
   ./configure --prefix=$ALPREFIX --enable-cxx --disable-static
-  nice make -j16
+  nice make -j"$MAKE_THREADS"
   make install
   cd ..
 fi
@@ -79,7 +83,7 @@ if [ "$WITH_EL" = 1 ]; then
     -DCMAKE_CXX_FLAGS="-dynamic" \
     -DCMAKE_Fortran_FLAGS="-dynamic" \
     ..
-  nice make -j16
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 fi
@@ -108,7 +112,7 @@ if [ "$WITH_SKYLARK" = 1 ]; then
     -DBUILD_PYTHON=OFF \
     -DBUILD_SHARED_LIBS=ON \
     -DBUILD_EXAMPLES=ON ..
-  nice make -j16
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 
@@ -137,7 +141,7 @@ fi
 #     -DBUILD_PYTHON=OFF \
 #     -DBUILD_SHARED_LIBS=ON \
 #     -DBUILD_EXAMPLES=ON ..
-#   nice make -j16
+#   nice make -j"$MAKE_THREADS"
 #   make install
 #   cd ../..
 # fi
@@ -157,7 +161,7 @@ if [ "$WITH_ARPACK" = 1 ]; then
     -DCMAKE_CXX_FLAGS="-dynamic" \
     -DCMAKE_Fortran_FLAGS="-dynamic" \
     ..
-  nice make -j16
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 fi
@@ -177,7 +181,7 @@ if [ "$WITH_ARPACKPP" = 1 ]; then
     -DCMAKE_CXX_FLAGS="-dynamic" \
     -DCMAKE_Fortran_FLAGS="-dynamic" \
     ..
-  nice make -j16
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 fi
@@ -196,7 +200,7 @@ if [ "$WITH_EIGEN" = 1 ]; then
     -DCMAKE_CXX_FLAGS="-dynamic" \
     -DCMAKE_Fortran_FLAGS="-dynamic" \
     ..
-  nice make -j16
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 fi
@@ -216,7 +220,7 @@ if [ "$WITH_SPDLOG" = 1 ]; then
     -DCMAKE_CXX_FLAGS="-dynamic" \
     -DCMAKE_Fortran_FLAGS="-dynamic" \
     ..
-  nice make -j16
+  nice make -j"$MAKE_THREADS"
   make install
   cd ../..
 fi

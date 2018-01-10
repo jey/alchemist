@@ -11,7 +11,7 @@ CXXFLAGS += $(EL_COMPILE_FLAGS) -fdiagnostics-color=always
 #CXXFLAGS += -Wall
 CXXFLAGS += -Wno-unused -Wno-reorder -std=c++14 -fext-numeric-literals -fopenmp
 CXXFLAGS += "-I$(ALPREFIX)/include" "-I$(ALPREFIX)/include/skylark" "-I$(ALPREFIX)/include/skylark/ml"
-LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)  
+LDFLAGS += "-L$(EL_LIB)" "-Wl,-rpath,$(EL_LIB)" $(EL_LIBS)  "-L$(ALPREFIX)/lib64"
 ifeq ($(shell uname), Darwin)
 LDFLAGS += -lboost_serialization-mt -lboost_mpi-mt -lboost_system-mt -larpack -lboost_thread-mt -lboost_program_options -lcskylark -lfftw3 -lfftw3f -lhdf5 -lhdf5_cpp -lhdf5_hl_cpp -lhdf5_hl
 else
