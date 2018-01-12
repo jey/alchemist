@@ -7,7 +7,7 @@
  * Solves argmin 1/(2n)*||A X - Y||_F^2 + lambda/2 ||X||_F^2
  * when A, Y, lambda are passed in (n is the height of A), by using CG
  * to get the solution to the equivalent system 
- * (1/2n A^T A + lambda/2 I) X = 1/n A^T Y
+ * (A^T A + lambda*n I) X = A^T Y
  *
  * modified version of libskylark/algorithms/Krylov/CG.hpp
  ***/
@@ -19,6 +19,7 @@
 #include "utility/timer.hpp"
 #include "algorithms/Krylov/internal.hpp"
 #include "algorithms/Krylov/precond.hpp"
+#include "spdlog/spdlog.h"
 
 namespace skylark { namespace algorithms {
 
@@ -28,14 +29,16 @@ namespace skylark { namespace algorithms {
  * X should be allocated, and we use it as initial value.
  */
 template<typename MatrixType, typename RhsType, typename SolType>
-int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double lambda,
-    krylov_iter_params_t params = krylov_iter_params_t(),
-    const outplace_precond_t<RhsType, SolType>& M =
+int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double
+    lambda, const std::shared_ptr<spdlog::logger> log, krylov_iter_params_t params =
+    krylov_iter_params_t(), const outplace_precond_t<RhsType, SolType>& M =
     outplace_id_precond_t<RhsType, SolType>()) {
 
 #   if SKYLARK_HAVE_PROFILER
     boost::mpi::communicator comm = utility::get_communicator(A);
 #   endif
+
+    log->info("Arrived in CG solver");
 
     SKYLARK_TIMER_INITIALIZE(CG_SYMM_PROFILE);
     SKYLARK_TIMER_INITIALIZE(CG_PRECOND_APPLY_PROFILE);
@@ -62,10 +65,10 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double lambd
     /** Throughout, we will use n, d, k to denote the problem dimensions */
     index_type n = base::Height(A);
     index_type d = base::Width(A); 
-    rhs_type B;
-    base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0/n), A, Y, value_type(0.0), B);
-    index_type k = base::Width(B);
-    rhs_type hermIntermed;
+    index_type k = base::Width(Y);
+    rhs_type B(X);
+    rhs_type hermIntermed(Y);
+    base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, Y, value_type(0.0), B);
 
     /** Set the parameter values accordingly */
     const value_type eps = 32*std::numeric_limits<value_type>::epsilon();
@@ -79,17 +82,22 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double lambd
     sol_type &Z =  !isprecond ? R : *(new sol_type(X));
 
     SKYLARK_TIMER_RESTART(CG_SYMM_PROFILE);
-    base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, X, value_type(0.0), hermIntermed);
-    base::Gemm(El::NORMAL, El::NORMAL, value_type(-1.0/(2*n)), A, hermIntermed, value_type(1.0), R);
-    base::Axpy(-value_type(lambda/2.0), X, R);
+    base::Gemm(El::NORMAL, El::NORMAL, value_type(1.0), A, X, value_type(0.0), hermIntermed);
+    //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Height(), A.Width(), X.Height(), X.Width(), hermIntermed.Height(), hermIntermed.Width());
+    base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(-1.0), A, hermIntermed, value_type(1.0), R);
+    //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Width(), A.Height(), hermIntermed.Height(), hermIntermed.Width(), R.Height(), R.Width());
+    base::Axpy(-value_type(lambda*n), X, R);
+    //log->info("Axpy: {} by {} added to {} by {}", X.Height(), X.Width(), R.Height(), R.Width());
     SKYLARK_TIMER_ACCUMULATE(CG_SYMM_PROFILE);
 
     scalar_cont_type
         nrmb(internal::scalar_cont_typer_t<rhs_type>::build_compatible(k, 1, B));
     base::ColumnNrm2(B, nrmb);
     double total_nrmb = 0.0;
-    for(index_type i = 0; i < k; i++)
+    for(index_type i = 0; i < k; i++) {
         total_nrmb += nrmb[i] * nrmb[i];
+        log->info("nrmb[{}] = {}", i, nrmb[i]);
+    }
     total_nrmb = sqrt(total_nrmb);
     scalar_cont_type ressqr(nrmb), rho(nrmb), rho0(nrmb), rhotmp(nrmb),
         alpha(nrmb), malpha(nrmb), beta(nrmb);
@@ -102,22 +110,28 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double lambd
             SKYLARK_TIMER_ACCUMULATE(CG_PRECOND_APPLY_PROFILE);
 
             base::ColumnDot(R, Z, rho);
-        } else
+        } else {
+            El::Copy(R, Z);
             rho = ressqr;
+        }
 
         if (itn == 0)
             El::Zero(beta);
         else
-            for(index_type i = 0; i < k; i++)
+            for(index_type i = 0; i < k; i++) 
                 beta[i] = rho[i] / rho0[i];
 
         El::DiagonalScale(El::RIGHT, El::NORMAL, beta, P);
         base::Axpy(value_type(1.0), Z, P);
 
+        // Compute Q = (A^TA + lambda*n I) P
         SKYLARK_TIMER_RESTART(CG_SYMM_PROFILE);
-        base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, X, value_type(0.0), hermIntermed);
-        base::Gemm(El::NORMAL, El::NORMAL, value_type(-1.0/(2*n)), A, hermIntermed, value_type(1.0), R);
-        base::Axpy(-value_type(lambda/2.0), X, R);
+        base::Gemm(El::NORMAL, El::NORMAL, value_type(1.0), A, P, value_type(0.0), hermIntermed);
+        //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Height(), A.Width(), P.Height(), P.Width(), hermIntermed.Height(), hermIntermed.Width());
+        base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, hermIntermed, value_type(0.0), Q);
+        //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Height(), A.Width(), hermIntermed.Height(), hermIntermed.Width(), Q.Height(), Q.Width());
+        base::Axpy(value_type(lambda*n), P, Q);
+        //log->info("Axpy: {} by {} added to {} by {}", P.Height(), P.Width(), Q.Height(), Q.Width());
         SKYLARK_TIMER_ACCUMULATE(CG_SYMM_PROFILE);
 
         base::ColumnDot(P, Q, rhotmp);
@@ -144,16 +158,12 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double lambd
             for(index_type i = 0; i < k; i++)
                 total_ressqr += ressqr[i];
             double relres = sqrt(total_ressqr) / total_nrmb;
-            params.log_stream << params.prefix << "CG: Iteration " << itn
-                              << ", Relres = "
-                              << boost::format("%.2e") % relres
-                              << ", " << convg << " rhs converged" << std::endl;
+            log->info("CG: Iteration {}, Relres = {:.2e}, {} rhs converged", itn, relres, convg);
         }
 
         if(convg == k) {
             if (log_lev1)
-                params.log_stream << params.prefix
-                                  << "CG: Convergence!" << std::endl;
+              log->info("CG: Convergence!");
             ret = -1;
             goto cleanup;
         }
@@ -161,9 +171,7 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double lambd
 
     ret = -6;
     if (log_lev1)
-        params.log_stream << params.prefix
-                          << "CG: No convergence within iteration limit."
-                          << std::endl;
+      log->info("CG: No convergence within iteration limit.");
 
  cleanup:
     if (isprecond)

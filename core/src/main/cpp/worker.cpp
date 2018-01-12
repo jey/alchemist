@@ -473,8 +473,9 @@ void FactorizedCGSolverCommand::run(Worker *self) const {
   El::DistMatrix<double, El::MD, El::STAR> * Amat = (El::DistMatrix<double, El::MD, El::STAR> *) self->matrices[A].get();
   El::DistMatrix<double, El::MD, El::STAR> * Bmat = (El::DistMatrix<double, El::MD, El::STAR> *) self->matrices[B].get();
   El::DistMatrix<double> * Xmat = new El::DistMatrix<double>(Amat->Width(), Bmat->Width(), self->grid);
+  El::Bernoulli(*Xmat, Xmat->Height(), Xmat->Width());
 
-  log->info("Relaying out lhs and rhs for LSQR");
+  log->info("Relaying out lhs and rhs for CG solver");
   auto startRelayout = std::chrono::system_clock::now();
   El::DistMatrix<double> * Arelayedout = relayout(*Amat, self->grid);
   El::DistMatrix<double> * Brelayedout = relayout(*Bmat, self->grid);
@@ -483,7 +484,11 @@ void FactorizedCGSolverCommand::run(Worker *self) const {
 
   auto params = skylark::algorithms::krylov_iter_params_t();
   params.iter_lim = maxIters;
-  skylark::algorithms::factorizedCG(*Arelayedout, *Brelayedout, *Xmat, lambda, params);
+  params.am_i_printing = true;
+  params.log_level = 2;
+  params.res_print = 20;
+  log->info("Calling the CG solver");
+  skylark::algorithms::factorizedCG(*Arelayedout, *Brelayedout, *Xmat, lambda, log, params);
   Arelayedout->EmptyData();
   Brelayedout->EmptyData();
   El::DistMatrix<double, El::MD, El::STAR> * Xrelayedout = delayout(*Xmat, self->grid);

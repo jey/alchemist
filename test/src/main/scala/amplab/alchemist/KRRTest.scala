@@ -29,8 +29,8 @@ object AlchemistRFMClassification {
         val filepath: String = args(0)
         val numFeatures: Int = args(1).toInt
         val gamma: Double = args(2).toDouble
+        val numClass: Int = args(3).toInt 
         val numSplits: Int = 100 // args(3).toInt
-        val numClass: Int = 147 // 10
         val maxIter: Int = 500
 
         // Launch Spark
@@ -65,8 +65,9 @@ object AlchemistRFMClassification {
         val rddWithIndices: RDD[(Int, (Array[Double], Array[Double]))] = RDDToIndexedRDD(rddOneHot)
         val rddA : RDD[IndexedRow] = rddWithIndices.map{ case (index, pair) => new IndexedRow(index, new DenseVector(pair._2)) }.cache()
         val rddB : RDD[IndexedRow] = rddWithIndices.map{ case (index, pair) => new IndexedRow(index, new DenseVector(pair._1)) }.cache()
-        val matA : IndexedRowMatrix = new IndexedRowMatrix(rddA, rddA.count(), numFeatures)
-        val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, rddB.count(), numClass)
+        val numPts = rddA.count()
+        val matA : IndexedRowMatrix = new IndexedRowMatrix(rddA, numPts, numFeatures)
+        val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, numPts, numClass)
         var t4 = System.nanoTime()
 
         // Train ridge regression via CG
@@ -78,10 +79,22 @@ object AlchemistRFMClassification {
         val rddX = alMatX.getIndexedRowMatrix()
         var t7 = System.nanoTime()
 
-        // TODO: compute misclassification rate
+        // Compute misclassification rate 
+        val alMatPredict = al.matMul(alMatA, alMatX)
+        val predictedEncodings : IndexedRowMatrix = alMatPredict.getIndexedRowMatrix()
+        val matPredictedEncodings : RDD[(Long, Array[Double])] = predictedEncodings.rows.map(row => (row.index, row.vector.toArray))
+        val matTrueEncodings : RDD[(Long, Array[Double])]= rddB.map(row => (row.index, row.vector.toArray))
+        val misClassified : Double = matPredictedEncodings.join(matTrueEncodings).mapValues{
+          case (enc1, enc2) => {
+            val pred : Int = enc1.indexOf(enc1.max)
+            val label : Int  = enc2.indexOf(enc2.max)
+            if (pred != label) 1 else 0
+          }
+        }.values.collect.sum.toDouble
+
 
         println(s"Alchemist timing (sec); conversion: ${(t4 - t3)*1.0E-9}, send: ${(t5-t4)*1.0E-9}, compute: ${(t6-t5)*1.0E-9}, receive: ${(t7-t6)*1.0E-9}")
-        println(" ")
+        println(s"Misclassification rate: ${misClassified/numPts}")
 
         al.stop
         sc.stop
@@ -124,7 +137,7 @@ object AlchemistRFMClassification {
         // estimate the kernel parameter (if it is unknown)
         var sigma: Double = rdd2.glom.map(Kernel.estimateSigma).mean
         sigma = math.sqrt(sigma)
-        println(s"Estimated sigma is $sigma")
+        println(s"Estimated sigma is ${sigma}")
 
         // random feature mapping
         val t1 = System.nanoTime()
@@ -132,9 +145,9 @@ object AlchemistRFMClassification {
                                                         .map(pair => (pair._1.toInt, pair._2))
                                                         .persist()
         val s = rfmRdd.take(1)(0)._2.size
-        println("s = $s")
+        println(s"s = ${s}")
         var t2 = System.nanoTime()
-        println("Computing random feature mapping took ${(t2-t1)*1.0E-9}")
+        println(s"Computing random feature mapping took ${(t2-t1)*1.0E-9}")
         println(" ")
         rfmRdd
     }
