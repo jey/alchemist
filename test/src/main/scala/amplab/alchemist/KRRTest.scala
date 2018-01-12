@@ -54,27 +54,29 @@ object AlchemistRFMClassification {
         println(" ")
 
         // Load data and perform RFM
+        println("Starting to load the data")
+        println(" ")
+        var t3 = System.nanoTime()
         val rddRaw: RDD[(Int, (Int, Array[Double]))] = format.toUpperCase match {
             case "LIBSVM" => RDDToIndexedRDD(loadLibsvmData(spark, filepath, numSplits))
             case "CSV" => RDDToIndexedRDD(loadCsvData(spark, filepath, numSplits))
         }
         val (rddA, rddTargets) = randomFeatureMap(rddRaw, numFeatures)
-        rddRaw.unpersist()
-        val rddOneHot: RDD[(Int, Array[Double])] = rddTargets.mapValues(oneHotEncode(_, numClass)).cache()
-        rddTargets.unpersist()
-
-        // Convert the Spark RDD into RDDs appropriate for calling Alchemist on:
-        // two IndexedRowMatrix RDDS for the LHS and the RHS
-        println("Starting the conversion to IndexedRowMatrices needed to use Alchemist CG implementation")
-        println(" ")
-        var t3 = System.nanoTime()
-        val rddB : RDD[IndexedRow] = rddOneHot.map{ case (index, encoding) => new IndexedRow(index, new DenseVector(encoding)) }.cache()
-        rddOneHot.unpersist()
         val numPts = rddA.count()
         val matA : IndexedRowMatrix = new IndexedRowMatrix(rddA, numPts, numFeatures)
+        rddTargets.count()
+        rddRaw.unpersist()
+
+        val rddOneHot: RDD[(Int, Array[Double])] = rddTargets.mapValues(oneHotEncode(_, numClass)).cache()
+        rddOneHot.count()
+        rddTargets.unpersist()
+        val rddB : RDD[IndexedRow] = rddOneHot.map{ case (index, encoding) => new IndexedRow(index, new DenseVector(encoding)) }.cache()
+        rddB.count()
+        rddOneHot.unpersist()
+
         val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, numPts, numClass)
         var t4 = System.nanoTime()
-        println("Finished the conversion")
+        println("Finished the data loading")
         println(" ")
 
         // Train ridge regression via CG
