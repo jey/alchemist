@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH -p regular
-#SBATCH -N 80
-#SBATCH -t 02:00:00
+#SBATCH -p debug
+#SBATCH -N 40
+#SBATCH -t 01:00:00
 #SBATCH -e mysparkjob_%j.err
 #SBATCH -o mysparkjob_%j.out
 #SBATCH -C haswell
@@ -21,7 +21,7 @@
 
 module unload darshan
 # x y means start x machines with y cores per process
-source setup/cori-start-alchemist.sh 30 1
+source setup/cori-start-alchemist.sh 35 2
 
 filepath=/global/cscratch1/sd/wss/data_timit/timit-train.csv
 format=CSV
@@ -35,7 +35,7 @@ spark-submit --verbose\
   --executor-memory 124G\
   --executor-cores 32 \
   --driver-cores 32  \
-  --num-executors 49 \
+  --num-executors 4 \
   --conf spark.eventLog.enabled=true\
   --conf spark.eventLog.dir=$SCRATCH/spark/event_logs\
   --class alchemist.test.regression.AlchemistRFMClassification\

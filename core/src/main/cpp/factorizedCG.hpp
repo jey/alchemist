@@ -68,7 +68,7 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double
     index_type k = base::Width(Y);
     rhs_type B(X);
     rhs_type hermIntermed(Y);
-    base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, Y, value_type(0.0), B);
+    El::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, Y, value_type(0.0), B);
 
     /** Set the parameter values accordingly */
     const value_type eps = 32*std::numeric_limits<value_type>::epsilon();
@@ -82,9 +82,9 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double
     sol_type &Z =  !isprecond ? R : *(new sol_type(X));
 
     SKYLARK_TIMER_RESTART(CG_SYMM_PROFILE);
-    base::Gemm(El::NORMAL, El::NORMAL, value_type(1.0), A, X, value_type(0.0), hermIntermed);
+    El::Gemm(El::NORMAL, El::NORMAL, value_type(1.0), A, X, value_type(0.0), hermIntermed);
     //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Height(), A.Width(), X.Height(), X.Width(), hermIntermed.Height(), hermIntermed.Width());
-    base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(-1.0), A, hermIntermed, value_type(1.0), R);
+    El::Gemm(El::TRANSPOSE, El::NORMAL, value_type(-1.0), A, hermIntermed, value_type(1.0), R);
     //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Width(), A.Height(), hermIntermed.Height(), hermIntermed.Width(), R.Height(), R.Width());
     base::Axpy(-value_type(lambda*n), X, R);
     //log->info("Axpy: {} by {} added to {} by {}", X.Height(), X.Width(), R.Height(), R.Width());
@@ -126,9 +126,9 @@ int factorizedCG(const MatrixType& A, const RhsType& Y, SolType& X, double
 
         // Compute Q = (A^TA + lambda*n I) P
         SKYLARK_TIMER_RESTART(CG_SYMM_PROFILE);
-        base::Gemm(El::NORMAL, El::NORMAL, value_type(1.0), A, P, value_type(0.0), hermIntermed);
+        El::Gemm(El::NORMAL, El::NORMAL, value_type(1.0), A, P, value_type(0.0), hermIntermed);
         //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Height(), A.Width(), P.Height(), P.Width(), hermIntermed.Height(), hermIntermed.Width());
-        base::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, hermIntermed, value_type(0.0), Q);
+        El::Gemm(El::TRANSPOSE, El::NORMAL, value_type(1.0), A, hermIntermed, value_type(0.0), Q);
         //log->info("Gemm : {} by {} times {} by {} stored in {} by {}", A.Height(), A.Width(), hermIntermed.Height(), hermIntermed.Width(), Q.Height(), Q.Width());
         base::Axpy(value_type(lambda*n), P, Q);
         //log->info("Axpy: {} by {} added to {} by {}", P.Height(), P.Width(), Q.Height(), Q.Width());
