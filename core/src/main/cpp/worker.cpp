@@ -491,8 +491,6 @@ void FactorizedCGSolverCommand::run(Worker *self) const {
   auto log = self->log;
   El::DistMatrix<double, El::VR, El::STAR> * Amat = (El::DistMatrix<double, El::VR, El::STAR> *) self->matrices[A].get();
   El::DistMatrix<double, El::VR, El::STAR> * Bmat = (El::DistMatrix<double, El::VR, El::STAR> *) self->matrices[B].get();
-
-  /*
   El::DistMatrix<double> * Xmat = new El::DistMatrix<double>(Amat->Width(), Bmat->Width(), self->grid);
   El::Bernoulli(*Xmat, Xmat->Height(), Xmat->Width());
 
@@ -518,8 +516,8 @@ void FactorizedCGSolverCommand::run(Worker *self) const {
   log->info("CG results has dimensions {}-by-{}", Xrelayedout->Height(), Xrelayedout->Width());
   ENSURE(self->matrices.insert(std::make_pair(X, std::unique_ptr<DistMatrix>(Xrelayedout))).second);
   self->world.barrier();
-  */
   
+  /*
   El::DistMatrix<double, El::VR, El::STAR> * Xmat = new El::DistMatrix<double, El::VR, El::STAR>(Amat->Width(), Bmat->Width(), self->grid);
   El::Bernoulli(*Xmat, Xmat->Height(), Xmat->Width());
 
@@ -534,6 +532,7 @@ void FactorizedCGSolverCommand::run(Worker *self) const {
   log->info("CG results has dimensions {}-by-{}", Xmat->Height(), Xmat->Width());
   ENSURE(self->matrices.insert(std::make_pair(X, std::unique_ptr<DistMatrix>(Xmat))).second);
   self->world.barrier();
+  */
 }
 
 // TODO: add seed as argument (make sure different workers do different things)
