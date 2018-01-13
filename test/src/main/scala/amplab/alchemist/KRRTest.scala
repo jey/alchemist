@@ -132,7 +132,7 @@ object AlchemistRFMClassification {
 
 
         println("Alchemist timing (sec):")
-        println(s"dataset creation: ${(extractStart - extractEnd)*1.0E-9}, transmit: ${(txEnd - txStart)*1.0E-9}")
+        println(s"dataset creation: ${(extractEnd - extractStart)*1.0E-9}, transmit: ${(txEnd - txStart)*1.0E-9}")
         println(s"random features computation: ${(rfComputeEnd - rfComputeStart)*1.0E-9}, CG computation: ${(cgComputeEnd - cgComputeStart)*1.0E-9}")
         println(s"recieve: ${(rxEnd - rxStart)*1.0E-9}")
         println(s"Misclassification rate: ${misClassified/numPts}")
