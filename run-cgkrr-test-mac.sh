@@ -10,11 +10,12 @@ format=LIBSVM
 numFeatures=10000
 gamma=.001
 numClass=10
+whereRFM=ALCHEMIST
 
 spark-submit --verbose\
   --master local[*] \
   --driver-memory 2G\
   --class alchemist.test.regression.AlchemistRFMClassification\
-  test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $filepath $format $numFeatures $gamma $numClass
+  test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $filepath $format $numFeatures $gamma $numClass $whereRFM
 exit
 

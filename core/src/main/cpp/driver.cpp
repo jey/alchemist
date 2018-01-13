@@ -46,6 +46,7 @@ struct Driver {
   void handle_SkylarkKRR();
   void handle_SkylarkLSQR();
   void handle_FactorizedCGSolver();
+  void handle_RandomFourierFeatures();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
@@ -157,6 +158,10 @@ int Driver::main() {
         handle_FactorizedCGSolver();
         break;
 
+      case 0x12:
+        handle_RandomFourierFeatures();
+        break;
+
       default:
         log->error("Unknown typeCode {#x}", typeCode);
         abort();
@@ -222,6 +227,29 @@ void Driver::handle_computeLowrankSVD() {
   output.flush();
 }
 */
+
+void Driver::handle_RandomFourierFeatures() {
+    MatrixHandle A{input.readInt()};
+    uint32_t numRandFeatures = input.readInt();
+    double sigma = input.readDouble();
+    uint32_t seed = input.readInt();
+
+    auto numRows = matrices[A].numRows;
+    uint32_t d = matrices[A].numCols;
+    MatrixHandle X = registerMatrix(numRows, numRandFeatures);
+
+    log->info("Computing Fourier Random Features on feature matrix {}");
+    log->info("Input dim: {}, Output dim: {}, number of points: {}", d, numRandFeatures, numRows);
+
+    RandomFourierFeaturesCommand cmd(A, X, numRandFeatures, sigma, seed);
+    issue(cmd);
+
+    world.barrier(); // wait for it to finish
+    output.writeInt(0x1);
+    output.writeInt(X.id);
+    output.flush();
+    log->info("Finished computing Fourier Random Features, stored matrix as {}", X);
+}
 
 void Driver::handle_FactorizedCGSolver() {
   MatrixHandle featureMat{input.readInt()};

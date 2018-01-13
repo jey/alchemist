@@ -243,6 +243,31 @@ struct SkylarkLSQRSolverCommand : Command {
   }
 };
 
+struct RandomFourierFeaturesCommand : Command {
+    MatrixHandle A;
+    MatrixHandle X;
+    uint32_t numRandFeatures;
+    double sigma;
+    uint32_t seed;
+
+    explicit RandomFourierFeaturesCommand() {}
+
+    RandomFourierFeaturesCommand(MatrixHandle A, MatrixHandle X, uint32_t numRandFeatures, double sigma, uint32_t seed):
+        A(A), X(X), numRandFeatures(numRandFeatures), sigma(sigma), seed(seed) {};
+
+    virtual void run(Worker * self) const;
+
+    template <typename Archive>
+    void serialize(Archive &ar, const unsigned version) {
+        ar & serialization::base_object<Command>(*this);
+        ar & A;
+        ar & X;
+        ar & numRandFeatures;
+        ar & sigma;
+        ar & seed;
+    }
+};
+
 struct FactorizedCGSolverCommand : Command {
   MatrixHandle A;
   MatrixHandle B;
@@ -495,5 +520,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::TruncatedSVDCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkKernelSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkLSQRSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::FactorizedCGSolverCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::RandomFourierFeaturesCommand);
 
 #endif

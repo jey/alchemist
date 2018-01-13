@@ -31,6 +31,7 @@ object AlchemistRFMClassification {
         val numFeatures: Int = args(2).toInt
         val gamma: Double = args(3).toDouble
         val numClass: Int = args(4).toInt 
+        val whereRFM: String = args(5)
         val numSplits: Int = 100 
         val maxIter: Int = 500
 
@@ -53,30 +54,115 @@ object AlchemistRFMClassification {
         println(s"Took ${(t2 -t1)*1.0E-9} seconds to launch Alchemist")
         println(" ")
 
-        // Load data and perform RFM
-        println("Starting to load the data")
+        // Load data 
+        println("Starting to load the raw data")
         println(" ")
         var t3 = System.nanoTime()
         val rddRaw: RDD[(Int, (Int, Array[Double]))] = format.toUpperCase match {
             case "LIBSVM" => RDDToIndexedRDD(loadLibsvmData(spark, filepath, numSplits))
             case "CSV" => RDDToIndexedRDD(loadCsvData(spark, filepath, numSplits))
         }
+        var t4 = System.nanoTime()
+        println(s"Took ${(t4 - t3)*1.0E-9} seconds to load the raw data")
+        println(" ")
+
+        whereRFM.toUpperCase match {
+            case "SPARK" => SparkRFMTest(al, rddRaw, numFeatures, numClass, gamma, maxIter)
+            case "ALCHEMIST" => AlchemistRFMTest(al, rddRaw, numFeatures, numClass, gamma, maxIter)
+        }
+        
+
+        al.stop
+        sc.stop
+    }
+
+    def AlchemistRFMTest(al: Alchemist, rddRaw : RDD[(Int, (Int, Array[Double]))], numFeatures: Int, numClass: Int, gamma: Double, maxIter: Int) : Unit = {
+
+       // Constructed IndexedRowMatrix containing the raw features and the encoded targets
+       println("Extracting the raw features and the encoded targets")
+       println(" ")
+       val extractStart = System.nanoTime()
+
+       val (rddA, sigma) = extractFeatures(rddRaw)
+       val numPts = rddA.count()
+       val numCols = rddA.take(1)(0).vector.size
+       val matA : IndexedRowMatrix = new IndexedRowMatrix(rddA, numPts, numCols)
+
+
+        val rddTargets : RDD[(Int, Int)] = rddRaw.mapValues(pair => pair._1)
+        val rddB: RDD[IndexedRow] = rddTargets.map{ case (index, classindex) => 
+                                                        new IndexedRow(index, new DenseVector(oneHotEncode(classindex, numClass)))
+                                                  }.cache()
+        rddB.count()
+        val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, numPts, numClass)
+
+        val extractEnd = System.nanoTime()
+
+        // Train ridge regression via CG
+        val txStart = System.nanoTime()
+        val alMatA = AlMatrix(al, matA)
+        val alMatB = AlMatrix(al, matB)
+        val txEnd = System.nanoTime()
+        
+        val seed = 12453
+        val rfComputeStart = System.nanoTime()
+        val alMatF = al.RandomFourierFeatures(alMatA, numFeatures, sigma, seed)
+        val rfComputeEnd = System.nanoTime()
+
+        val cgComputeStart = System.nanoTime()
+        val alMatX = al.factorizedCGKRR(alMatF, alMatB, gamma, maxIter)
+        val cgComputeEnd = System.nanoTime()
+
+        val rxStart = System.nanoTime()
+        val rddX = alMatX.getIndexedRowMatrix()
+        var rxEnd = System.nanoTime()
+
+        // Compute misclassification rate 
+        val alMatPredict = al.matMul(alMatF, alMatX)
+        val predictedEncodings : IndexedRowMatrix = alMatPredict.getIndexedRowMatrix()
+        val matPredictedEncodings : RDD[(Long, Array[Double])] = predictedEncodings.rows.map(row => (row.index, row.vector.toArray))
+        val matTrueEncodings : RDD[(Long, Array[Double])]= rddB.map(row => (row.index, row.vector.toArray))
+        val misClassified : Double = matPredictedEncodings.join(matTrueEncodings).mapValues{
+          case (enc1, enc2) => {
+            val pred : Int = enc1.indexOf(enc1.max)
+            val label : Int  = enc2.indexOf(enc2.max)
+            if (pred != label) 1 else 0
+          }
+        }.values.collect.sum.toDouble
+
+
+        println("Alchemist timing (sec):")
+        println(s"dataset creation: ${(extractStart - extractEnd)*1.0E-9}, transmit: ${(txEnd - txStart)*1.0E-9}")
+        println(s"random features computation: ${(rfComputeEnd - rfComputeStart)*1.0E-9}, CG computation: ${(cgComputeEnd - cgComputeStart)*1.0E-9}")
+        println(s"recieve: ${(rxEnd - rxStart)*1.0E-9}")
+        println(s"Misclassification rate: ${misClassified/numPts}")
+        println(" ")
+
+    }
+
+    def SparkRFMTest(al: Alchemist, rddRaw : RDD[(Int, (Int, Array[Double]))], numFeatures: Int, numClass: Int, gamma: Double, maxIter: Int) : Unit = {
+
+        println("Computing the random Fourier Features and one-hot encodings")
+        println(" ")
+
+        var t3 = System.nanoTime()
         val (rddA, rddTargets) = randomFeatureMap(rddRaw, numFeatures)
+        rddRaw.unpersist()
         val numPts = rddA.count()
         val matA : IndexedRowMatrix = new IndexedRowMatrix(rddA, numPts, numFeatures)
         rddTargets.count()
         rddRaw.unpersist()
 
-        val rddOneHot: RDD[(Int, Array[Double])] = rddTargets.mapValues(oneHotEncode(_, numClass)).cache()
-        rddOneHot.count()
-        rddTargets.unpersist()
-        val rddB : RDD[IndexedRow] = rddOneHot.map{ case (index, encoding) => new IndexedRow(index, new DenseVector(encoding)) }.cache()
+        val rddB: RDD[IndexedRow] = rddTargets.map{ case (index, classindex) => 
+                                                        new IndexedRow(index, new DenseVector(oneHotEncode(classindex, numClass)))
+                                                  }.cache()
         rddB.count()
-        rddOneHot.unpersist()
+        rddTargets.unpersist()
 
         val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, numPts, numClass)
         var t4 = System.nanoTime()
-        println("Finished the data loading")
+
+        println("Finished computing the features and encodings")
         println(" ")
 
         // Train ridge regression via CG
@@ -104,9 +190,8 @@ object AlchemistRFMClassification {
 
         println(s"Alchemist timing (sec); conversion: ${(t4 - t3)*1.0E-9}, send: ${(t5-t4)*1.0E-9}, compute: ${(t6-t5)*1.0E-9}, receive: ${(t7-t6)*1.0E-9}")
         println(s"Misclassification rate: ${misClassified/numPts}")
+        println(" ")
 
-        al.stop
-        sc.stop
     }
 
     def loadCsvData(spark: SparkSession, filepath: String, numSplits: Int) : RDD[(Int, Array[Double])] = {
@@ -148,7 +233,7 @@ object AlchemistRFMClassification {
         val targetRdd: RDD[(Int, Int)] = rdd.mapValues(pair => pair._1).persist()
 
         // rdd2 contains just the features
-        val rdd2: RDD[(Int, Array[Double])] = rdd.mapValues(pair => pair._2).persist()
+        val rdd2: RDD[(Int, Array[Double])] = rdd.mapValues(pair => pair._2)
 
         // estimate the kernel parameter (if it is unknown)
         var sigma: Double = rdd2.map(pair => (pair._1.toDouble, pair._2)).glom.map(Kernel.estimateSigma).mean
@@ -161,13 +246,31 @@ object AlchemistRFMClassification {
                                                         .mapPartitions(Kernel.rbfRfm(_, numFeatures, sigma))
                                                         .map(pair => new IndexedRow(pair._1.toInt, new DenseVector(pair._2)))
                                                         .cache()
-        rdd2.unpersist()
+        rfmRdd.count()
         val numfeats = rfmRdd.take(1)(0).vector.size
         println(s"numfeats = ${numfeats}")
         var t2 = System.nanoTime()
         println(s"Computing random feature mapping took ${(t2-t1)*1.0E-9} seconds")
         println(" ")
         (rfmRdd, targetRdd)
+    }
+
+    def extractFeatures(rdd: RDD[(Int, (Int, Array[Double]))]) : Tuple2[RDD[IndexedRow], Double] = {
+        
+        val targetRdd: RDD[(Int, Int)] = rdd.mapValues(pair => pair._1).persist()
+
+        // rdd2 contains just the features
+        val rdd2: RDD[(Int, Array[Double])] = rdd.mapValues(pair => pair._2)
+
+        // indexedrowmatrix containing just the features
+        val rdd3: RDD[IndexedRow] = rdd2.map(pair => new IndexedRow(pair._1, new DenseVector(pair._2))).cache()
+
+        // estimate the kernel parameter (if it is unknown)
+        var sigma: Double = rdd2.map(pair => (pair._1.toDouble, pair._2)).glom.map(Kernel.estimateSigma).mean
+        sigma = math.sqrt(sigma)
+        println(s"Estimated sigma is ${sigma}")
+
+        (rdd3, sigma)
     }
 
     def oneHotEncode(target: Int, numClass: Int) : Array[Double] = {
@@ -192,7 +295,7 @@ object AlchemistRFMClassification {
         val t2 = System.nanoTime()
         println(s"Converting RDD to an Indexed RDD took ${(t2 - t1)*1.0E-9} seconds")
         println(" ")
-        indexedRdd.persist
+        indexedRdd.cache()
     }
 
 }

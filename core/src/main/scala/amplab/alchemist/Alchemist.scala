@@ -283,6 +283,24 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return Xhandle
   }
 
+  def RandomFourierFeatures(featureMat: MatrixHandle, numRandFeatures: Int, 
+    sigma: Double, seed: Int) : MatrixHandle = {
+    output.writeInt(0x12)
+    output.writeInt(featureMat.id)
+    output.writeInt(numRandFeatures)
+    output.writeDouble(sigma)
+    output.writeInt(seed)
+    output.flush()
+
+    if (input.readInt() != 0x1) {
+        throw new  ProtocolError()
+    }
+
+    val Xhandle = new MatrixHandle(input.readInt())
+
+    return Xhandle
+  }
+
   def factorizedCGKRR(featureMat: MatrixHandle, targetMat: MatrixHandle, 
     lambda: Double, maxIters: Int) : MatrixHandle = {
     output.writeInt(0x11)
@@ -573,6 +591,13 @@ class Alchemist(val mysc: SparkContext) {
       regression, lossfunction.id, regularizer.id, kernel.id, kernelparam,
       kernelparam2, kernelparam3, lambda, maxiter, tolerance, rho, seed,
       randomfeatures, numfeaturepartitions)
+    new AlMatrix(this, Xhandle)
+  }
+
+  def RandomFourierFeatures(featureMat: AlMatrix, numRandomFeatures: Int, 
+    sigma: Double, seed: Int = 12345) : AlMatrix = {
+    val Xhandle = client.RandomFourierFeatures(featureMat.handle, 
+        numRandomFeatures, sigma, seed)
     new AlMatrix(this, Xhandle)
   }
 

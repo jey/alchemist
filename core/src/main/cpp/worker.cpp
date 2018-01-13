@@ -468,6 +468,25 @@ void SkylarkKernelSolverCommand::run(Worker *self) const {
   self->world.barrier();
 }
 
+void RandomFourierFeaturesCommand::run(Worker *self) const {
+    auto log = self->log;
+    typedef El::DistMatrix<double, El::MD, El::STAR> DistMatrixType;
+    namespace skys = skylark::sketch;
+
+    DistMatrixType * Amat = (DistMatrixType *) self->matrices[A].get();
+    DistMatrixType * Fmat = new DistMatrixType(Amat->Height(), numRandFeatures, self->grid);
+
+    skylark::base::context_t context(seed);
+    skys::GaussianRFT_t<DistMatrixType, DistMatrixType> RFFSketcher(Amat->Width(), numRandFeatures, sigma, context);
+
+    log->info("Computing the Gaussian Random Features");
+    RFFSketcher.apply(*Amat, *Fmat, skys::rowwise_tag());
+    log->info("Finished computing");
+    ENSURE(self->matrices.insert(std::make_pair(X, std::unique_ptr<DistMatrix>(Fmat))).second);
+
+    self->world.barrier();
+}
+
 void FactorizedCGSolverCommand::run(Worker *self) const {
   auto log = self->log;
   El::DistMatrix<double, El::MD, El::STAR> * Amat = (El::DistMatrix<double, El::MD, El::STAR> *) self->matrices[A].get();
