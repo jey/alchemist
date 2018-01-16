@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -p debug
-#SBATCH -N 40
+#SBATCH -N 60
 #SBATCH -t 01:00:00
 #SBATCH -e mysparkjob_%j.err
 #SBATCH -o mysparkjob_%j.out
@@ -18,14 +18,17 @@
 # (from my experiments, trying to pack more on a single process causes std::alloc array length failures)
 # so choose number of processes and hence number of nodes accordingly, based on how much memory you need
 # for the data, any relayouts that may be needed, etc.
+#
+# NB: you should ensure the data isn't concentrated on just
+# a few spark nodes, otherwise the communication to Alchemist will be slow
 
 module unload darshan
 # x y means start x machines with y cores per process
-source setup/cori-start-alchemist.sh 35 2
+source setup/cori-start-alchemist.sh 45 2
 
 filepath=/global/cscratch1/sd/wss/data_timit/timit-train.csv
 format=CSV
-numFeatures=100000
+numFeatures=60000
 gamma=.001
 numClass=147
 whereRFM=ALCHEMIST

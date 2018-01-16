@@ -43,7 +43,7 @@ export FC="ftn"
 ##### Start Spark and Alchemist  ##############
 ###############################################
 
-# slaves is automatrically generated when the spark module is loaded, and contains 
+# slaves is automatically generated when the spark module is loaded, and contains 
 # the machines on which the spark executors will run (so one less than the number of machines allocated in this Cori batch job)
 # split this into two machine files: one for Spark, one for Alchemist
 
@@ -52,10 +52,21 @@ module load spark/2.1.0
 ALCHEMISTNODECOUNT=$1 
 [[ $SPARKURL =~ spark://(.*):(.*) ]]
 export SPARK_MASTER_NODE=${BASH_REMATCH[1]}
-mv $SPARK_WORKER_DIR/slaves $SPARK_WORKER_DIR/slaves.original
-cat $SPARK_WORKER_DIR/slaves.original | sed -n "1,${ALCHEMISTNODECOUNT}p" > $SPARK_WORKER_DIR/hosts.alchemist
-cat $SPARK_WORKER_DIR/slaves.original | sed -n "$((${ALCHEMISTNODECOUNT}+1)),\$p" > $SPARK_WORKER_DIR/slaves
-mkdir -p $SPARK_WORKER_DIR/alchemistIOs
+if [ ! -f $SPARK_WORKER_DIR/slaves.original ]; then
+  mv $SPARK_WORKER_DIR/slaves $SPARK_WORKER_DIR/slaves.original
+  cat $SPARK_WORKER_DIR/slaves.original | sed -n "1,${ALCHEMISTNODECOUNT}p" > $SPARK_WORKER_DIR/hosts.alchemist
+  cat $SPARK_WORKER_DIR/slaves.original | sed -n "$((${ALCHEMISTNODECOUNT}+1)),\$p" > $SPARK_WORKER_DIR/slaves
+  mkdir -p $SPARK_WORKER_DIR/alchemistIOs
+else
+  # assume Spark and Alchemist have already been started in this allocation
+  # shut-down Spark and restart it
+  # assume Alchemist has already been shut down (should always end when Spark does, whether by error or deliberate), and clear its output
+  # remove the file Spark uses to tell Alchemist which port to connect to
+  rm $SPARK_WORKER_DIR/alchemistIOs/*
+  rm $SPARK_WORKER_DIR/connection.info
+  stop-all.sh
+  sleep 1m # give the stops time to percolate
+fi
 
 # start spark 
 start-all.sh

@@ -71,7 +71,6 @@ object AlchemistRFMClassification {
             case "ALCHEMIST" => AlchemistRFMTest(al, rddRaw, numFeatures, numClass, gamma, maxIter)
         }
         
-
         al.stop
         sc.stop
     }
@@ -85,58 +84,61 @@ object AlchemistRFMClassification {
 
        val (rddA, sigma) = extractFeatures(rddRaw)
        val numPts = rddA.count()
+       println(s"There are ${numPts} points in the dataset")
+       println(" ")
        val numCols = rddA.take(1)(0).vector.size
+       println(s"There are ${numCols} raw input features")
+       println(" ")
        val matA : IndexedRowMatrix = new IndexedRowMatrix(rddA, numPts, numCols)
 
+       val rddTargets : RDD[(Int, Int)] = rddRaw.mapValues(pair => pair._1)
+       val rddB: RDD[IndexedRow] = rddTargets.map{ case (index, classindex) => 
+                                                       new IndexedRow(index, new DenseVector(oneHotEncode(classindex, numClass)))
+                                                 }.cache()
+       rddB.count()
+       val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, numPts, numClass)
 
-        val rddTargets : RDD[(Int, Int)] = rddRaw.mapValues(pair => pair._1)
-        val rddB: RDD[IndexedRow] = rddTargets.map{ case (index, classindex) => 
-                                                        new IndexedRow(index, new DenseVector(oneHotEncode(classindex, numClass)))
-                                                  }.cache()
-        rddB.count()
-        val matB : IndexedRowMatrix = new IndexedRowMatrix(rddB, numPts, numClass)
+       val extractEnd = System.nanoTime()
 
-        val extractEnd = System.nanoTime()
+       // Train ridge regression via CG
+       val txStart = System.nanoTime()
+       val alMatA = AlMatrix(al, matA)
+       val alMatB = AlMatrix(al, matB)
+       val txEnd = System.nanoTime()
+       
+       val seed = 12453
+       val rfComputeStart = System.nanoTime()
+       val alMatF = al.RandomFourierFeatures(alMatA, numFeatures, sigma, seed)
+       val rfComputeEnd = System.nanoTime()
 
-        // Train ridge regression via CG
-        val txStart = System.nanoTime()
-        val alMatA = AlMatrix(al, matA)
-        val alMatB = AlMatrix(al, matB)
-        val txEnd = System.nanoTime()
-        
-        val seed = 12453
-        val rfComputeStart = System.nanoTime()
-        val alMatF = al.RandomFourierFeatures(alMatA, numFeatures, sigma, seed)
-        val rfComputeEnd = System.nanoTime()
+       val cgComputeStart = System.nanoTime()
+       val alMatX = al.factorizedCGKRR(alMatF, alMatB, gamma, maxIter)
+       val cgComputeEnd = System.nanoTime()
 
-        val cgComputeStart = System.nanoTime()
-        val alMatX = al.factorizedCGKRR(alMatF, alMatB, gamma, maxIter)
-        val cgComputeEnd = System.nanoTime()
+       val rxStart = System.nanoTime()
+       val rddX = alMatX.getIndexedRowMatrix()
+       var rxEnd = System.nanoTime()
 
-        val rxStart = System.nanoTime()
-        val rddX = alMatX.getIndexedRowMatrix()
-        var rxEnd = System.nanoTime()
-
-        // Compute misclassification rate 
-        val alMatPredict = al.matMul(alMatF, alMatX)
-        val predictedEncodings : IndexedRowMatrix = alMatPredict.getIndexedRowMatrix()
-        val matPredictedEncodings : RDD[(Long, Array[Double])] = predictedEncodings.rows.map(row => (row.index, row.vector.toArray))
-        val matTrueEncodings : RDD[(Long, Array[Double])]= rddB.map(row => (row.index, row.vector.toArray))
-        val misClassified : Double = matPredictedEncodings.join(matTrueEncodings).mapValues{
-          case (enc1, enc2) => {
-            val pred : Int = enc1.indexOf(enc1.max)
-            val label : Int  = enc2.indexOf(enc2.max)
-            if (pred != label) 1 else 0
-          }
-        }.values.collect.sum.toDouble
+       // Compute misclassification rate 
+       val alMatPredict = al.matMul(alMatF, alMatX)
+       val predictedEncodings : IndexedRowMatrix = alMatPredict.getIndexedRowMatrix()
+       val matPredictedEncodings : RDD[(Long, Array[Double])] = predictedEncodings.rows.map(row => (row.index, row.vector.toArray))
+       val matTrueEncodings : RDD[(Long, Array[Double])]= rddB.map(row => (row.index, row.vector.toArray))
+       val misClassified : Double = matPredictedEncodings.join(matTrueEncodings).mapValues{
+         case (enc1, enc2) => {
+           val pred : Int = enc1.indexOf(enc1.max)
+           val label : Int  = enc2.indexOf(enc2.max)
+           if (pred != label) 1 else 0
+         }
+       }.values.collect.sum.toDouble
 
 
-        println("Alchemist timing (sec):")
-        println(s"dataset creation: ${(extractEnd - extractStart)*1.0E-9}, transmit: ${(txEnd - txStart)*1.0E-9}")
-        println(s"random features computation: ${(rfComputeEnd - rfComputeStart)*1.0E-9}, CG computation: ${(cgComputeEnd - cgComputeStart)*1.0E-9}")
-        println(s"recieve: ${(rxEnd - rxStart)*1.0E-9}")
-        println(s"Misclassification rate: ${misClassified/numPts}")
-        println(" ")
+       println("Alchemist timing (sec):")
+       println(s"dataset creation: ${(extractEnd - extractStart)*1.0E-9}, transmit: ${(txEnd - txStart)*1.0E-9}")
+       println(s"random features computation: ${(rfComputeEnd - rfComputeStart)*1.0E-9}, CG computation: ${(cgComputeEnd - cgComputeStart)*1.0E-9}")
+       println(s"recieve: ${(rxEnd - rxStart)*1.0E-9}")
+       println(s"Misclassification rate: ${misClassified/numPts}")
+       println(" ")
 
     }
 

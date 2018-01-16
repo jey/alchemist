@@ -184,7 +184,6 @@ class WorkerClient(val hostname: String, val port: Int) {
 
 class WorkerInfo(val id: WorkerId, val hostname: String, val port: Int) extends Serializable {
   def newClient(): WorkerClient = {
-    System.err.println(s"connecting to $hostname:$port")
     new WorkerClient(hostname, port)
   }
 }
