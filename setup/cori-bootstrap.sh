@@ -44,7 +44,7 @@ module load boost
 module load cmake
 module load sbt
 module load fftw
-module load cray-hdf5-parallel
+module load cray-hdf5
 export PATH=$ALPREFIX/bin:$PATH
 export CPATH=$ALPREFIX/include:$CPATH
 export LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
@@ -103,6 +103,7 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   cd build
   export ELEMENTAL_ROOT="$ALPREFIX"
   export RANDOM123_ROOT="$ALPREFIX"
+  # HDF5_ROOT is set when cray-hdf5 module is loaded
   CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \

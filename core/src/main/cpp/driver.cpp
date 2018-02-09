@@ -33,6 +33,7 @@ struct Driver {
   Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log);
   void issue(const Command &cmd);
   MatrixHandle registerMatrix(size_t numRows, size_t numCols);
+  void reshapeMatrix(MatrixHandle handle, size_t numRows, size_t numCols);
   int main();
 
   void handle_newMatrix();
@@ -47,6 +48,7 @@ struct Driver {
   void handle_SkylarkLSQR();
   void handle_FactorizedCGSolver();
   void handle_RandomFourierFeatures();
+  void handle_ReadHDF5();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
@@ -63,6 +65,12 @@ MatrixHandle Driver::registerMatrix(size_t numRows, size_t numCols) {
   MatrixDescriptor info(handle, numRows, numCols);
   matrices.insert(std::make_pair(handle, info));
   return handle;
+}
+
+void Driver::reshapeMatrix(MatrixHandle handle, size_t numRows, size_t numCols) {
+    matrices.erase(handle);
+    MatrixDescriptor info(handle, numRows, numCols);
+    matrices.insert(std::make_pair(handle, info));
 }
 
 int Driver::main() {
@@ -162,6 +170,10 @@ int Driver::main() {
         handle_RandomFourierFeatures();
         break;
 
+      case 0x13:
+        handle_ReadHDF5();
+        break;
+
       default:
         log->error("Unknown typeCode {#x}", typeCode);
         abort();
@@ -249,6 +261,27 @@ void Driver::handle_RandomFourierFeatures() {
     output.writeInt(X.id);
     output.flush();
     log->info("Finished computing Fourier Random Features, stored matrix as {}", X);
+}
+
+void Driver::handle_ReadHDF5() {
+    std::string fname = input.readString();
+    std::string varname = input.readString();
+    MatrixHandle A = registerMatrix(0, 0);
+    
+    log->info("Reading variable {} from file {}");
+    ReadHDF5Command cmd(A, fname, varname);
+    issue(cmd);
+
+    size_t numRows, numCols;
+    world.recv(1, mpi::any_tag, numRows);
+    world.recv(1, mpi::any_tag, numCols);
+    world.barrier();
+
+    reshapeMatrix(A, numRows, numCols);
+    output.writeInt(0x1);
+    output.writeInt(A.id);
+    output.flush();
+    log->info("Finished loading variable from HDF5 file");
 }
 
 void Driver::handle_FactorizedCGSolver() {

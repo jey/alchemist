@@ -14,6 +14,7 @@
 #include "hilbert.hpp"
 #include "utils.hpp"
 #include "factorizedCG.hpp"
+#include <H5Cpp.h>
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -484,6 +485,28 @@ void RandomFourierFeaturesCommand::run(Worker *self) const {
     log->info("Finished computing");
     ENSURE(self->matrices.insert(std::make_pair(X, std::unique_ptr<DistMatrix>(Fmat))).second);
 
+    self->world.barrier();
+}
+
+void ReadHDF5Command::run(Worker * self) const {
+    auto log = self->log;
+    typedef El::DistMatrix<double, El::VR, El::STAR> DistMatrixType;
+    namespace skyio = skylark::utility::io;
+
+    DistMatrixType *AMatTranspose = new DistMatrixType(1, 1, self->grid);
+    DistMatrixType *AMat = new DistMatrixType(1, 1, self->grid);
+
+    H5::H5File h5FileIn(fname, H5F_ACC_RDONLY);
+    skyio::ReadHDF5(h5FileIn, varname, *AMatTranspose);
+    El::Transpose(*AMatTranspose, *AMat);
+    AMatTranspose->Empty();
+
+    ENSURE(self->matrices.insert(std::make_pair(A, std::unique_ptr<DistMatrix>(AMat))).second);
+
+    if (self->world.rank() == 1) {
+        self->world.send(0, 0, AMat->Height());
+        self->world.send(0, 0, AMat->Width());
+    }
     self->world.barrier();
 }
 

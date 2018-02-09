@@ -268,6 +268,28 @@ struct RandomFourierFeaturesCommand : Command {
     }
 };
 
+struct ReadHDF5Command : Command {
+    MatrixHandle A;
+    std::string fname;
+    std::string varname;
+
+    explicit ReadHDF5Command() {}
+
+    ReadHDF5Command(MatrixHandle A, std::string fname, std::string varname):
+        A(A), fname(fname), varname(varname) {};
+
+    virtual void run(Worker * self) const;
+
+    template <typename Archive>
+    void serialize(Archive &ar, const unsigned version) {
+        ar & serialization::base_object<Command>(*this);
+        ar & A;
+        ar & fname;
+        ar & varname;
+    }
+    
+};
+
 struct FactorizedCGSolverCommand : Command {
   MatrixHandle A;
   MatrixHandle B;
@@ -521,5 +543,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkKernelSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkLSQRSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::FactorizedCGSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::RandomFourierFeaturesCommand);
+BOOST_CLASS_EXPORT_KEY(alchemist::ReadHDF5Command);
 
 #endif

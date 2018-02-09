@@ -26,4 +26,5 @@ BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::SkylarkKernelSolverCommand);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::SkylarkLSQRSolverCommand);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::FactorizedCGSolverCommand);
 BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::RandomFourierFeaturesCommand);
+BOOST_CLASS_EXPORT_IMPLEMENT(alchemist::ReadHDF5Command);
 

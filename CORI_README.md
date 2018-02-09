@@ -21,7 +21,7 @@ git checkout cori-version
 source ./alchemist/setup/cori-bootstrap.sh
 
 module unload PrgEnv-intel
-module load PrgEnv-gnu gcc java python boost sbt cray-hdf5-parallel fftw
+module load PrgEnv-gnu gcc java python boost sbt cray-hdf5 fftw
 export ALPREFIX=$SCRATCH/alchemistbase/bins
 
 cd alchemist
