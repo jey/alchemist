@@ -268,7 +268,7 @@ void Driver::handle_ReadHDF5() {
     std::string varname = input.readString();
     MatrixHandle A = registerMatrix(0, 0);
     
-    log->info("Reading variable {} from file {}");
+    log->info("Reading variable {} from file {}", varname, fname);
     ReadHDF5Command cmd(A, fname, varname);
     issue(cmd);
 

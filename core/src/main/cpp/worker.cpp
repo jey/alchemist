@@ -14,7 +14,7 @@
 #include "hilbert.hpp"
 #include "utils.hpp"
 #include "factorizedCG.hpp"
-#include <H5Cpp.h>
+#include "alchemistreadhdf5.hpp"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -491,15 +491,10 @@ void RandomFourierFeaturesCommand::run(Worker *self) const {
 void ReadHDF5Command::run(Worker * self) const {
     auto log = self->log;
     typedef El::DistMatrix<double, El::VR, El::STAR> DistMatrixType;
-    namespace skyio = skylark::utility::io;
 
-    DistMatrixType *AMatTranspose = new DistMatrixType(1, 1, self->grid);
     DistMatrixType *AMat = new DistMatrixType(1, 1, self->grid);
 
-    H5::H5File h5FileIn(fname, H5F_ACC_RDONLY);
-    skyio::ReadHDF5(h5FileIn, varname, *AMatTranspose);
-    El::Transpose(*AMatTranspose, *AMat);
-    AMatTranspose->Empty();
+    alchemistReadHDF5(fname, varname, *AMat, log);
 
     ENSURE(self->matrices.insert(std::make_pair(A, std::unique_ptr<DistMatrix>(AMat))).second);
 
@@ -790,7 +785,20 @@ void TruncatedSVDCommand::run(Worker *self) const {
       // form U
       self->log->info("computing A*V");
       self->log->info("A is {}-by-{}, V is {}-by-{}, the resulting matrix should be {}-by-{}", A->Height(), A->Width(), V->Height(), V->Width(), U->Height(), U->Width());
-      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *V, 0.0, *U);
+      self->log->info("Relaying out A,V for GEMM");
+      auto Aprox = new El::DistMatrix<double>(A->Height(), A->Width(), self->grid);
+      auto Vprox = new El::DistMatrix<double>(V->Height(), V->Width(), self->grid);
+      El::Copy(*V, *Vprox);
+      self->log->info("Done relaying out V for GEMM");
+      El::Copy(*A, *Aprox);
+      self->log->info("Done relaying out A for GEMM");
+      auto Uprox = new El::DistMatrix<double>(U->Height(), U->Width(), self->grid);
+      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *Aprox, *Vprox, 0.0, *Uprox);
+      self->log->info("Done with GEMM");
+      El::Copy(*Uprox, *U);
+      delete Uprox;
+      delete Aprox;
+      delete Vprox;
       self->log->info("done computing A*V");
       // TODO: do a QR instead to ensure stability, but does column pivoting so would require postprocessing S,V to stay consistent
       El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);

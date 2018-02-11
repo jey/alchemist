@@ -20,9 +20,10 @@ git clone https://github.com/alexgittens/alchemist.git
 git checkout cori-version 
 source ./alchemist/setup/cori-bootstrap.sh
 
+module unload darshan
 module unload PrgEnv-intel
-module load PrgEnv-gnu gcc java python boost sbt cray-hdf5 fftw
-export ALPREFIX=$SCRATCH/alchemistbase/bins
+module load PrgEnv-gnu gcc java python boost sbt hdf5-parallel fftw
+export ALPREFIX=$SCRATCH/alchemistSHELL/bins
 
 cd alchemist
 make build

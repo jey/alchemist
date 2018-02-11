@@ -336,7 +336,7 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
   }
 
   def readHDF5(fname: String, varname: String) : MatrixHandle = {
-    output.writeInt(0x9)
+    output.writeInt(0x13)
     output.writeString(fname)
     output.writeString(varname)
     output.flush()

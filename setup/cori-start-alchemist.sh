@@ -18,6 +18,7 @@
 # need to update this variable depending on where you installed alchemist
 export ALPREFIX=$SCRATCH/alchemistSHELL/bins
 
+module unload darshan
 module unload PrgEnv-intel
 module load PrgEnv-gnu
 module load gcc
@@ -26,6 +27,7 @@ module load python
 module load boost
 module load cmake
 module load sbt
+module load hdf5-parallel
 
 # the library paths probably don't need to be set, as alchemist is build with everything in rpath
 export PATH=$ALPREFIX/bin:$PATH

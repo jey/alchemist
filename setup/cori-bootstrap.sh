@@ -35,6 +35,7 @@ TOOLCHAIN=$ALROOT/alchemist/setup/Cori-gnu.cmake
 [ -f "$TOOLCHAIN" ]
 
 # Setup
+module unload darshan
 module unload PrgEnv-intel
 module load PrgEnv-gnu
 module load gcc
@@ -44,7 +45,8 @@ module load boost
 module load cmake
 module load sbt
 module load fftw
-module load cray-hdf5
+module load hdf5-parallel
+
 export PATH=$ALPREFIX/bin:$PATH
 export CPATH=$ALPREFIX/include:$CPATH
 export LIBRARY_PATH=$ALPREFIX/lib64:$ALPREFIX/lib:$LIBRARY_PATH
@@ -103,11 +105,13 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   cd build
   export ELEMENTAL_ROOT="$ALPREFIX"
   export RANDOM123_ROOT="$ALPREFIX"
-  # HDF5_ROOT is set when cray-hdf5 module is loaded
+  # HDF5_ROOT is set when hdf5-parallel module is loaded
   CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
     -DCMAKE_BUILD_TYPE=RELEASE \
+    -DCMAKE_C_FLAGS="-dynamic -fext-numeric-literals" \
+    -DCMAKE_CXX_FLAGS="-dynamic -fext-numeric-literals" \
     -DUSE_HYBRID=OFF \
     -DUSE_FFTW=ON \
     -DBUILD_PYTHON=OFF \
@@ -118,34 +122,9 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   cd ../..
 
   # for some reason, this didn't seem to install, so manually copy it over
-  # recheck in future and remove if unnecessary
+  # recheck in future and remove this line if it is unnecessary
   cp -r libskylark/utility/fft $ALPREFIX/include/skylark/utility
 fi
-
-# # Skylark
-# # need to use development-v0.30 branch and patch it
-# if [ "$WITH_SKYLARK" = 1 ]; then
-#   git clone https://github.com/xdata-skylark/libskylark.git
-#   cd libskylark
-#   git checkout development-v0.30
-#   git apply $ALROOT/alchemist/setup/crlsc.patch
-#   mkdir build
-#   cd build
-#   export ELEMENTAL_ROOT="$ALPREFIX"
-#   export RANDOM123_ROOT="$ALPREFIX"
-#   CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
-#     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
-#     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-#     -DCMAKE_BUILD_TYPE=RELEASE \
-#     -DUSE_HYBRID=OFF \
-#     -DUSE_FFTW=ON \
-#     -DBUILD_PYTHON=OFF \
-#     -DBUILD_SHARED_LIBS=ON \
-#     -DBUILD_EXAMPLES=ON ..
-#   nice make -j"$MAKE_THREADS"
-#   make install
-#   cd ../..
-# fi
 
 # arpack-ng
 if [ "$WITH_ARPACK" = 1 ]; then
