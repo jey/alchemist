@@ -272,12 +272,13 @@ void Driver::handle_ReadHDF5() {
     ReadHDF5Command cmd(A, fname, varname);
     issue(cmd);
 
-    size_t numRows, numCols;
+    El::Int numRows, numCols;
     world.recv(1, mpi::any_tag, numRows);
     world.recv(1, mpi::any_tag, numCols);
     world.barrier();
 
     reshapeMatrix(A, numRows, numCols);
+    log->info("Loaded matrix is {}-by-{}", matrices[A].numRows, matrices[A].numCols);
     output.writeInt(0x1);
     output.writeInt(A.id);
     output.flush();

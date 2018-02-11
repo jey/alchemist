@@ -57,6 +57,8 @@ object AlMatrix {
     mat.rows.mapPartitionsWithIndex { (idx, part) =>
       val rows = part.toArray
       val relevantWorkers = rows.map(row => rowWorkerAssignments(row.index.toInt).id).distinct.map(id => new WorkerId(id))
+      println("Sending data to following workers: ")
+      println(relevantWorkers.map(node => node.id.toString).mkString(" "))
       val maxWorkerId = relevantWorkers.map(node => node.id).max
       var nodeClients = Array.fill(maxWorkerId+1)(None: Option[WorkerClient])
       System.err.println(s"Connecting to ${relevantWorkers.length} workers")

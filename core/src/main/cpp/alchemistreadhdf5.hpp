@@ -76,7 +76,7 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
     int maxRowsPerProcess = myNumRows;
     for(int curRank = 0; curRank < numProcesses; curRank++)
         maxRowsPerProcess = maxRowsPerProcess < allRanksRows[curRank] ? allRanksRows[curRank] : maxRowsPerProcess;
-    int numReadChunks = std::round((maxRowsPerProcess + 0.0) / maxRowChunk);
+    int numReadChunks = std::max((int)std::round((maxRowsPerProcess + 0.0) / maxRowChunk), 1);
     log->info("Will need to use {} separate reads", numReadChunks);
 
     // figure out the first row to read for this rank

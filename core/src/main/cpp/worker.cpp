@@ -497,6 +497,7 @@ void ReadHDF5Command::run(Worker * self) const {
     alchemistReadHDF5(fname, varname, *AMat, log);
 
     ENSURE(self->matrices.insert(std::make_pair(A, std::unique_ptr<DistMatrix>(AMat))).second);
+    log->info("Read matrix has Frobenius norm {}", El::FrobeniusNorm(*AMat));
 
     if (self->world.rank() == 1) {
         self->world.send(0, 0, AMat->Height());
@@ -786,19 +787,19 @@ void TruncatedSVDCommand::run(Worker *self) const {
       self->log->info("computing A*V");
       self->log->info("A is {}-by-{}, V is {}-by-{}, the resulting matrix should be {}-by-{}", A->Height(), A->Width(), V->Height(), V->Width(), U->Height(), U->Width());
       self->log->info("Relaying out A,V for GEMM");
-      auto Aprox = new El::DistMatrix<double>(A->Height(), A->Width(), self->grid);
-      auto Vprox = new El::DistMatrix<double>(V->Height(), V->Width(), self->grid);
-      El::Copy(*V, *Vprox);
+      //auto Aprox = new El::DistMatrix<double>(A->Height(), A->Width(), self->grid);
+      //auto Vprox = new El::DistMatrix<double>(V->Height(), V->Width(), self->grid);
+      //El::Copy(*V, *Vprox);
       self->log->info("Done relaying out V for GEMM");
-      El::Copy(*A, *Aprox);
+      //El::Copy(*A, *Aprox);
       self->log->info("Done relaying out A for GEMM");
-      auto Uprox = new El::DistMatrix<double>(U->Height(), U->Width(), self->grid);
-      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *Aprox, *Vprox, 0.0, *Uprox);
+      //auto Uprox = new El::DistMatrix<double>(U->Height(), U->Width(), self->grid);
+      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *V, 0.0, *U);
       self->log->info("Done with GEMM");
-      El::Copy(*Uprox, *U);
-      delete Uprox;
-      delete Aprox;
-      delete Vprox;
+      //El::Copy(*Uprox, *U);
+      //delete Uprox;
+      //delete Aprox;
+      //delete Vprox;
       self->log->info("done computing A*V");
       // TODO: do a QR instead to ensure stability, but does column pivoting so would require postprocessing S,V to stay consistent
       El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);

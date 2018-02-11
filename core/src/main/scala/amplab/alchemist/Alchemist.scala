@@ -158,7 +158,6 @@ class WorkerClient(val hostname: String, val port: Int) {
     outbuf.putInt(handle.id)
     outbuf.putLong(rowIndex)
     sendMessage(outbuf)
-
     val inbuf = beginInput(8 + 8 * numCols)
     while(inbuf.hasRemaining()) {
       sock.read(inbuf)
@@ -167,6 +166,7 @@ class WorkerClient(val hostname: String, val port: Int) {
     assert(numCols * 8 == inbuf.getLong())
     val vec = new Array[Double](numCols)
     inbuf.asDoubleBuffer().get(vec)
+    println(s"got row ${rowIndex}")
     return new DenseVector(vec)
   }
 
