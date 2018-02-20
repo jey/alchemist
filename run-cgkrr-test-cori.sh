@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -p debug
-#SBATCH -N 60
+#SBATCH -N 15
 #SBATCH -t 01:00:00
 #SBATCH -e mysparkjob_%j.err
 #SBATCH -o mysparkjob_%j.out
@@ -22,13 +22,12 @@
 # NB: you should ensure the data isn't concentrated on just
 # a few spark nodes, otherwise the communication to Alchemist will be slow
 
-module unload darshan
 # x y means start x machines with y cores per process
-source setup/cori-start-alchemist.sh 45 2
+source setup/cori-start-alchemist.sh 10 2
 
 filepath=/global/cscratch1/sd/wss/data_timit/timit-train.csv
 format=CSV
-numFeatures=60000
+numFeatures=10000
 gamma=.001
 numClass=147
 whereRFM=ALCHEMIST

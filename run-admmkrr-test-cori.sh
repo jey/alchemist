@@ -22,7 +22,6 @@
 # NB: you should ensure the data isn't concentrated on just
 # a few spark nodes, otherwise the communication to Alchemist will be slow
 
-module unload darshan
 # x y means start x machines with y cores per process
 source setup/cori-start-alchemist.sh 10 2
 
@@ -40,7 +39,7 @@ spark-submit --verbose\
   --num-executors 4 \
   --conf spark.eventLog.enabled=true\
   --conf spark.eventLog.dir=$SCRATCH/spark/event_logs\
-  --class alchemist.test.regression.AlchemistADMMTest\
+  --class amplab.alchemist.AlchemistADMMTest\
   test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $filepath $format $numFeatures $gamma $numClass 2>&1 | tee test.log
 
 stop-all.sh

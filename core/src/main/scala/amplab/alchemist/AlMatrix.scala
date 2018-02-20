@@ -18,6 +18,7 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     // TODO:
     // should map the rows back to the executors using locality information if possible
     // otherwise shuffle the rows on the MPI side before sending them back to SPARK
+
     val numPartitions = max(al.sc.defaultParallelism, al.client.workerCount)
     val sacrificialRDD = al.sc.parallelize(0 until numRows.toInt, numPartitions)
     val layout : Array[WorkerId] = (0 until sacrificialRDD.partitions.size).map(x => new WorkerId(x % al.client.workerCount)).toArray
@@ -29,11 +30,14 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
 
     al.client.getIndexedRowMatrixStart(handle, full_layout)
     val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
-      val worker = ctx.connectWorker(layout(idx))
-      val result  = rowindices.toList.map { rowIndex =>
-        new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex, numCols))
-      }.iterator
-      worker.close()
+      var result : Iterator[IndexedRow] = Iterator.empty // it's possible not every partition will have data in it when the matrix being returned is small
+      if (!rowindices.toList.isEmpty) {
+          val worker = ctx.connectWorker(layout(idx))
+          result = rowindices.toList.map { rowIndex =>
+            new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex, numCols))
+          }.iterator
+          worker.close()
+      }
       result
     }, preservesPartitioning=true)
     val result = new IndexedRowMatrix(rows, numRows, numCols)

@@ -6,7 +6,7 @@ cd $SCRATCH/alchemistSHELL/alchemist # or wherever you installed alchemist as in
 # this will allocate 3 nodes for alchemist processes, and each alchemist process will be given 2 cores; 
 # the remaining 4 nodes will run Spark; see the script for more details
 source setup/cori-start-alchemist.sh 3 2
-make check # will run the current test suite
+# now run one of the test scripts
 ```
 
 # Installation instructions (for Cori: can run on a login node or inside a queue job)
@@ -17,7 +17,6 @@ bash # need to use bash
 mkdir -p $SCRATCH/alchemistbase
 cd $SCRATCH/alchemistbase
 git clone https://github.com/alexgittens/alchemist.git
-git checkout cori-version 
 source ./alchemist/setup/cori-bootstrap.sh
 
 module unload darshan
@@ -30,5 +29,6 @@ make build
 ```
 
 # To test
+Look through the test src files as needed to see how to call them, or use one of the test scripts. Caveat the testing code is messy.
 Needs to be made less manual and more in line with standard practices, e.g., see the spark-perf project
 
