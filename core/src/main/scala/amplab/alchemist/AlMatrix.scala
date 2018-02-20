@@ -37,6 +37,8 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
             new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex, numCols))
           }.iterator
           worker.close()
+      } else {
+        println(s"No rows were assigned to partition ${idx}, so returning an empty partition")
       }
       result
     }, preservesPartitioning=true)
