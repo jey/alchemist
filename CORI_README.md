@@ -26,6 +26,8 @@ export ALPREFIX=$SCRATCH/alchemistSHELL/bins
 
 cd alchemist
 make build
+
+now edit the cori-start-alchemist.sh start script to ensure that ALPREFIX is set correctly
 ```
 
 # To test
