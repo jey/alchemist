@@ -204,3 +204,5 @@ if [ "$WITH_SPDLOG" = 1 ]; then
   make install
   cd ../..
 fi
+
+cd ..

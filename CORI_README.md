@@ -17,7 +17,7 @@ bash # need to use bash
 mkdir -p $SCRATCH/alchemistbase
 cd $SCRATCH/alchemistbase
 git clone https://github.com/alexgittens/alchemist.git
-source ./alchemist/setup/cori-bootstrap.sh
+bash ./alchemist/setup/cori-bootstrap.sh
 
 module unload darshan
 module unload PrgEnv-intel

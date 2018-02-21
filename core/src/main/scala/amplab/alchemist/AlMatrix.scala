@@ -30,6 +30,23 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
 
     al.client.getIndexedRowMatrixStart(handle, full_layout)
     val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
+      val worker = ctx.connectWorker(layout(idx))
+      val result  = rowindices.toList.map { rowIndex =>
+        new IndexedRow(rowIndex, worker.getIndexedRowMatrix_getRow(handle, rowIndex, numCols))
+      }.iterator
+      worker.close()
+      result
+    }, preservesPartitioning=true)
+    val result = new IndexedRowMatrix(rows, numRows, numCols)
+    result.rows.cache()
+    result.rows.count
+    al.client.getIndexedRowMatrixFinish(handle)
+    result
+  }
+}
+
+  /**
+    val rows = sacrificialRDD.mapPartitionsWithIndex( (idx, rowindices) => {
       var result : Iterator[IndexedRow] = Iterator.empty // it's possible not every partition will have data in it when the matrix being returned is small
       if (!rowindices.toList.isEmpty) {
           val worker = ctx.connectWorker(layout(idx))
@@ -48,8 +65,7 @@ class AlMatrix(val al: Alchemist, val handle: MatrixHandle) {
     al.client.getIndexedRowMatrixFinish(handle)
     result
   }
-
-}
+  **/
 
 object AlMatrix {
   def apply(al: Alchemist, mat: IndexedRowMatrix): AlMatrix = {

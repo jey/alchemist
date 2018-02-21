@@ -16,7 +16,7 @@
 ###############################################
 
 # need to update this variable depending on where you installed alchemist
-export ALPREFIX=$SCRATCH/alchemistSHELL/bins
+export ALPREFIX=$SCRATCH/alchemistSHELL2/bins
 
 module unload darshan
 module unload PrgEnv-intel
