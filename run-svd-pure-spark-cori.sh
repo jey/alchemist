@@ -26,7 +26,10 @@
 # As for Spark, idk how to choose the number of executors. Take more than you should need, i guess.
 # Spark is horrible w.r.t. using memory efficiently.
 
-method=Spark-SVD
+module load spark/2.1.0
+start-all.sh
+
+method=SparkSVD
 # 2.5M by 10K double matrix is 200 GB
 m=10000000 
 n=10000
@@ -42,7 +45,7 @@ spark-submit --verbose\
   --executor-memory 120G\
   --executor-cores 32 \
   --driver-cores 32  \
-  --num-executors 30 \
+  --num-executors 29 \
   --conf spark.driver.extraLibraryPath=$SCRATCH/alchemistSHELL/alchemist/lib\
   --conf spark.executor.extraLibraryPath=$SCRATCH/alchemistSHELL/alchemist/lib\
   --conf spark.eventLog.enabled=true\

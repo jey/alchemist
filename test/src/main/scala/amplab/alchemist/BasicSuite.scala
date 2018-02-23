@@ -22,7 +22,7 @@ object BasicSuite {
   def main(args: Array[String]): Unit = {
     args(0).toUpperCase match {
         case "SVD" => testSVD(args.tail)
-        case "SPARK-SVD" => testSparkSVD(args.tail)
+        case "SPARKSVD" => testSparkSVD(args.tail)
         case "KMEANS" => testKMeans(args.tail)
         case "MATMUL" => testMatMul(args.tail)
         case "LSQR" => testLSQR(args.tail)
