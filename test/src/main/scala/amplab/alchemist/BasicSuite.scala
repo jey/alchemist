@@ -204,10 +204,10 @@ object BasicSuite {
         rdd.rows.count
         System.err.println("done creating and caching dataset for SVD test")
 
-        computeStart = ticks()
+        val computeStart = ticks()
         val svd = rdd.computeSVD(k, computeU = true) 
         svd.U.rows.count()
-        computeEnd = ticks()
+        val computeEnd = ticks()
         System.err.println(s"Spark timing: svd= ${(computeEnd-computeStart)/1000.0}")
 
         sc.stop
