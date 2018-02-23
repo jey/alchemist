@@ -20,15 +20,15 @@ MAKE_THREADS=8
 # NOTE: skylark doesn't link against the available version of COMBBLAS, so enabling
 # COMBBLAS will build it, but skylark will not use it
 WITH_BREW_PREREQS=0
-WITH_EL=1
+WITH_EL=0
 WITH_COMBBLAS=0
-WITH_RANDOM123=1
+WITH_RANDOM123=0
 WITH_HDF5=1
-WITH_SKYLARK=1
-WITH_ARPACK=1
-WITH_ARPACKPP=1
-WITH_EIGEN=1
-WITH_SPDLOG=1
+WITH_SKYLARK=0
+WITH_ARPACK=0
+WITH_ARPACKPP=0
+WITH_EIGEN=0
+WITH_SPDLOG=0
 
 # install brewable prereqs if not already there
 # TODO: really don't like installing brew packages w/ nonstandard compiler, but works for now
@@ -121,18 +121,21 @@ fi
 # TODO: figure out how to use CMAKE so it can detect zlib and szip
 # for now, have to manually update the library paths in the install code if versions of packages change
 # the include and lib for the szlib and zlib packages were obtained using brew ls 'package'
+# ditto for the cflags and ldflags for open-mpi: I used mpicc --showme:compile / --showme:link
 if [ "$WITH_HDF5" = 1 ]; then
 	if [ ! -d hdf5-1.10.1 ]; then
 		curl -L https://support.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.10.1.tar > hdf5-1.10.1.tar
 		tar xzf hdf5-1.10.1.tar
 	fi
 	cd hdf5-1.10.1
-	./configure --prefix="$ALPREFIX" \
-		--enable-cxx \
-		--enable-java \
+  CFLAGS="-I/usr/local/Cellar/open-mpi/3.0.0_2/include" \
+  FCFLAGS="-I/usr/local/Cellar/open-mpi/3.0.0_2/include" \
+  LDFLAGS="-L/usr/local/opt/libevent/lib -L/usr/local/Cellar/open-mpi/3.0.0_2/lib -lmpi -lmpi_mpifh" \
+  ./configure --prefix="$ALPREFIX" \
 		--enable-fortran \
+    --enable-parallel \
 		--with-zlib=/usr/local/opt/zlib/include,/usr/local/opt/zlib/lib \
-		--with-szlib=/usr/local/Cellar/szip/2.1.1/include/,/usr/local/Cellar/szip/2.1.1/lib/
+		--with-szlib=/usr/local/Cellar/szip/2.1.1/include/,/usr/local/Cellar/szip/2.1.1/lib/ 
 	nice make -j"$MAKE_THREADS"
 	make install
 fi

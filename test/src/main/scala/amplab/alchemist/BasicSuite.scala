@@ -22,6 +22,7 @@ object BasicSuite {
   def main(args: Array[String]): Unit = {
     args(0).toUpperCase match {
         case "SVD" => testSVD(args.tail)
+        case "SPARK-SVD" => testSparkSVD(args.tail)
         case "KMEANS" => testKMeans(args.tail)
         case "MATMUL" => testMatMul(args.tail)
         case "LSQR" => testLSQR(args.tail)
@@ -184,6 +185,31 @@ object BasicSuite {
         System.err.println(s"Spark timing: svd= ${(computeEnd-computeStart)/1000.0}")
 
         al.stop
+        sc.stop
+    }
+
+    def testSparkSVD(args: Array[String]): Unit = {
+        val conf = new SparkConf().setAppName("Alchemist SVD Test")
+        val sc = new SparkContext(conf)
+
+        var m = args(0).toInt
+        var n = args(1).toInt
+        var k = args(2).toInt
+        var partitions = if (args(3).toInt > 0) args(3).toInt else sc.defaultParallelism
+        System.err.println(s"using ${partitions} parallelism for the rdds") 
+
+        val rows = RandomRDDs.normalVectorRDD(sc, m, n, partitions).zipWithIndex
+        val rdd = new IndexedRowMatrix(rows.map(x => new IndexedRow(x._2, x._1)))
+        rdd.rows.cache
+        rdd.rows.count
+        System.err.println("done creating and caching dataset for SVD test")
+
+        computeStart = ticks()
+        val svd = rdd.computeSVD(k, computeU = true) 
+        svd.U.rows.count()
+        computeEnd = ticks()
+        System.err.println(s"Spark timing: svd= ${(computeEnd-computeStart)/1000.0}")
+
         sc.stop
     }
 
