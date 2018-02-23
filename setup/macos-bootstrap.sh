@@ -23,8 +23,8 @@ WITH_BREW_PREREQS=0
 WITH_EL=0
 WITH_COMBBLAS=0
 WITH_RANDOM123=0
-WITH_HDF5=1
-WITH_SKYLARK=0
+WITH_HDF5=0
+WITH_SKYLARK=1
 WITH_ARPACK=0
 WITH_ARPACKPP=0
 WITH_EIGEN=0
@@ -69,10 +69,13 @@ if [ "$WITH_EL" = 1 ]; then
     rm -rf build/*
   fi
   cd build
-  cmake \
+  # had to set LDFLAGS using output of mpicc --showme:link
+  # otherwise Parmetis build fails with a link error showing it can't find MPI
+  LDFLAGS="-L/usr/local/opt/libevent/lib -L/usr/local/Cellar/open-mpi/3.0.0_2/lib -lmpi" cmake \
     -DCMAKE_BUILD_TYPE=Release \
     -DEL_IGNORE_OSX_GCC_ALIGNMENT_PROBLEM=ON \
-    -DCMAKE_INSTALL_PREFIX=$ALPREFIX ..
+    -DCMAKE_INSTALL_PREFIX=$ALPREFIX \
+    ..
   nice make -j"$MAKE_THREADS" 
   make install
   cd ../..
@@ -138,9 +141,12 @@ if [ "$WITH_HDF5" = 1 ]; then
 		--with-szlib=/usr/local/Cellar/szip/2.1.1/include/,/usr/local/Cellar/szip/2.1.1/lib/ 
 	nice make -j"$MAKE_THREADS"
 	make install
+  cd ../..
 fi
 
 # Skylark
+# Don't support Skylark w/ HDF5 because it requires the C++ bindings, which are 
+# crappy and conflict with using HDF5 w/ MPIO support
 if [ "$WITH_SKYLARK" = 1 ]; then
   if [ ! -d libskylark ]; then
     git clone https://github.com/xdata-skylark/libskylark.git
@@ -155,7 +161,7 @@ if [ "$WITH_SKYLARK" = 1 ]; then
   export ELEMENTAL_ROOT="$ALPREFIX"
   export COMBBLAS_ROOT="$ALPREFIX/CombBLAS_beta_16_1"
   export RANDOM123_ROOT="$ALPREFIX"
-	export HDF5_ROOT=$ALPREFIX
+  export HDF5_ROOT="."
   CXXFLAGS="-dynamic -std=c++14 -fext-numeric-literals" cmake \
     -DCMAKE_INSTALL_PREFIX="$ALPREFIX" \
     -DCMAKE_BUILD_TYPE=RELEASE \
