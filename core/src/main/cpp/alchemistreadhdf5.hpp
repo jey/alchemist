@@ -161,7 +161,7 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
     // this current rank contains rows startRow : endRow
     // row i of this chunk has the Elemental index X.GlobalRow(i),
     // and we want it to map to the actual Elemental row i
-    log->info("Now permuting the rows");
+    log->info("Now computing row permutation");
     El::DistPermutation perm;
     perm.MakeIdentity(dims[0]);
     /** this should work, but does not. I think setImage's behavior does depend on the 
@@ -207,6 +207,7 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
       trueToEl[curRow] = curRow;
       ElToTrue[curRow] = curRow;
     }
+    log->info("Now permuting the rows");
     perm.PermuteRows(X);
     //El::Display(X);
 
