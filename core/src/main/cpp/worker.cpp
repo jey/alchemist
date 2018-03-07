@@ -494,7 +494,7 @@ void ReadHDF5Command::run(Worker * self) const {
 
     DistMatrixType *AMat = new DistMatrixType(1, 1, self->grid);
 
-    alchemistReadHDF5(fname, varname, *AMat, log);
+    alchemistReadHDF5(fname, varname, *AMat, log, colreplicas);
 
     ENSURE(self->matrices.insert(std::make_pair(A, std::unique_ptr<DistMatrix>(AMat))).second);
     log->info("Read matrix has Frobenius norm {}", El::FrobeniusNorm(*AMat));
@@ -763,6 +763,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       DistMatrix * S = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * Sinv = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * V = new El::DistMatrix<double, El::VR, El::STAR>(n, nconv, self->grid);
+      DistMatrix * Vlocal = new El::DistMatrix<double, El::STAR, El::STAR>(n, nconv, self->grid);
 
       ENSURE(self->matrices.insert(std::make_pair(UHandle, std::unique_ptr<DistMatrix>(U))).second);
       ENSURE(self->matrices.insert(std::make_pair(SHandle, std::unique_ptr<DistMatrix>(S))).second);
@@ -774,6 +775,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
         for(El::Int colIdx=0; colIdx < (El::Int) nconv; colIdx++)
           if(V->IsLocal(rowIdx, colIdx))
             V->SetLocal(V->LocalRow(rowIdx), V->LocalCol(colIdx), rightEigs(rowIdx,colIdx));
+      El::Copy(*V, *Vlocal);
       // populate S, Sinv
       for(El::Int idx=0; idx < (El::Int) nconv; idx++) {
         if(S->IsLocal(idx, 0))
@@ -794,7 +796,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       //El::Copy(*A, *Aprox);
       self->log->info("Done relaying out A for GEMM");
       //auto Uprox = new El::DistMatrix<double>(U->Height(), U->Width(), self->grid);
-      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *V, 0.0, *U);
+      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *Vlocal, 0.0, *U);
       self->log->info("Done with GEMM");
       //El::Copy(*Uprox, *U);
       //delete Uprox;

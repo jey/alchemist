@@ -335,10 +335,11 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return (UHandle, SHandle, VHandle)
   }
 
-  def readHDF5(fname: String, varname: String) : MatrixHandle = {
+  def readHDF5(fname: String, varname: String, colreplicas: Int) : MatrixHandle = {
     output.writeInt(0x13)
     output.writeString(fname)
     output.writeString(varname)
+    output.writeInt(colreplicas)
     output.flush()
 
     if (input.readInt() != 0x1) {
@@ -612,8 +613,8 @@ class Alchemist(val mysc: SparkContext) {
     (new AlMatrix(this, uHandle), new AlMatrix(this, sHandle), new AlMatrix(this, vHandle))
   }
 
-  def readHDF5(fname: String, varname: String) : AlMatrix = {
-    val matHandle = client.readHDF5(fname, varname)
+  def readHDF5(fname: String, varname: String, colreplicas: Int = 1) : AlMatrix = {
+    val matHandle = client.readHDF5(fname, varname, colreplicas)
     new AlMatrix(this, matHandle)
   }
 }

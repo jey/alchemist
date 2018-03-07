@@ -272,11 +272,12 @@ struct ReadHDF5Command : Command {
     MatrixHandle A;
     std::string fname;
     std::string varname;
+    int colreplicas;
 
     explicit ReadHDF5Command() {}
 
-    ReadHDF5Command(MatrixHandle A, std::string fname, std::string varname):
-        A(A), fname(fname), varname(varname) {};
+    ReadHDF5Command(MatrixHandle A, std::string fname, std::string varname, int colreplicas):
+        A(A), fname(fname), varname(varname), colreplicas(colreplicas) {};
 
     virtual void run(Worker * self) const;
 
@@ -286,6 +287,7 @@ struct ReadHDF5Command : Command {
         ar & A;
         ar & fname;
         ar & varname;
+        ar & colreplicas;
     }
     
 };

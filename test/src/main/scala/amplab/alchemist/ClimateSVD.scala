@@ -68,8 +68,9 @@ object ClimateSVD {
 
             if (loadAlc == 1) {
                 val varname = args(4)
+                val colreplicas = args(5).toInt
                 var loadStart = ticks()
-                alMatA = al.readHDF5(fname, varname)
+                alMatA = al.readHDF5(fname, varname, colreplicas)
                 var loadEnd = ticks()
                 println("Time cost for loading dataset in Alchemist")
                 println((loadEnd - loadStart)/1000.0)

@@ -10,8 +10,7 @@
 typedef El::DistMatrix<double, El::VR, El::STAR> DistMatrixType;
 typedef El::DistMatrix<int, El::VR, El::STAR> PermVecType;
 
-
-// TODO: use logger, exit with error codes, use format lib
+// TODO: manage case where reading matrix too small to have info on each executor, general error handling
 // NB: each HDF5 read can only ask for 2GB, according to https://support.hdfgroup.org/HDF5/faq/limits.html (bottom of page)
 
 /**
@@ -19,15 +18,18 @@ typedef El::DistMatrix<int, El::VR, El::STAR> PermVecType;
  * Using collective calls b/c serial calls too slow even to read just one of the rows from each process
  * Merging the hyperslabs is too slow, so each process loads a chunk of rows, then they are permuted to 
  * get them into the right locations
- * caveat: this procedure requires twice as much memory as the matrix itself takes up
+ * CAVEAT: this procedure requires (1 + replicas) as much memory as the matrix itself takes up
+ * CAVEAT: this assumes all the processes participate in reading (i.e., the matrix is not too small!)
  *
  * @param fnameIn HDF5 file
  * @param varName name of the variable to be read (including path)
+ * @param Y matrix to be written into
  * @param log pointer to the spd logger object to use for output
+ * @param replicas number of times to replicate the input matrix (replicates column-wise)
  * @param maxMB maximum number of megabytes to read in each rank in a single hdf5 read
  */
-void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType & X, 
-    const std::shared_ptr<spdlog::logger> log, int maxMB = 2000) {
+void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType & Y, 
+    const std::shared_ptr<spdlog::logger> log, int replicas = 1, int maxMB = 2000) {
     hid_t file_id, dataset_id, space_id, memspace_id;
     herr_t status;
     int ndims;
@@ -37,7 +39,7 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
     hid_t plist_id;
     hsize_t count[2];
 
-    El::mpi::Comm Comm= X.Grid().Comm();
+    El::mpi::Comm Comm= Y.Grid().Comm();
     int myRank = El::mpi::Rank(Comm);
     int numProcesses = El::mpi::Size(Comm);
 
@@ -57,6 +59,9 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
 
     H5Sget_simple_extent_dims(space_id, dims, NULL);
     log->info("{} rows, {} columns", dims[0], dims[1]);
+
+    DistMatrixType X;
+    X.SetGrid(Y.Grid());
     X.Resize(dims[0], dims[1]); // HDF5 returns data in row-major format, while Elemental stores it in column-major, so we'll have to transpose each local block in place
 
     // figure out which rows to load
@@ -113,11 +118,7 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
         }
         status = H5Sselect_hyperslab(space_id, H5S_SELECT_SET, offset, NULL , count, NULL);
         status = H5Sselect_hyperslab(memspace_id, H5S_SELECT_SET, memoffset, NULL, count, NULL);
-        htri_t file_validity = H5Sselect_valid(space_id);
-        htri_t mem_validity = H5Sselect_valid(memspace_id);
-        if ( (file_validity  > 0) && (mem_validity > 0)) {
-            log->info("The file and memory selections are valid");
-        }
+
         log->info("On read {} of {}, selected and reading rows {}--{}", curReadNum + 1, numReadChunks, offset[0], offset[0] + count[0] - 1);
         //status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, space_id, plist_id, X.Buffer() + memoffset[0]*dims[1]);
         status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, space_id, plist_id, tempTarget);
@@ -139,17 +140,88 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
     status = H5Pclose(plist_id);
 
     // HDF5 reads in row major order, Elemental expects local matrix in column major order, so convert
-    double * buffer = X.Buffer();
-    El::Int ldim = X.LDim();
+    log->info("Transposing the data from HDF5 format to Elemental format");
+    double * Xbuffer = X.Buffer();
+    El::Int Xldim = X.LDim();
     for(El::Int j=0; j < X.LocalWidth(); ++j)
         for(El::Int i=0; i < X.LocalHeight(); ++i)
-            buffer[i + j*ldim] = tempTarget[j + i*dims[1]];
-    delete tempTarget;
+            Xbuffer[i + j*Xldim] = tempTarget[j + i*dims[1]];
+    delete[] tempTarget;
 
-    // TODO: permute the rows so they are on the right processes
-    // if entry i of the vector is j, that indicates that row j should become row i after the permutation
-    //PermVecType permVec(X.Height(), 1, X.Grid);
-    //El::PermuteRows(X, permVec);
+    // Output raw read matrix from HDF5 before permutation for error checking
+    /*
+    log->info("Dumping raw matrix to file for debugging");
+    std::ofstream dumpfout;
+    dumpfout.open("matdump.out", std::ios::trunc);
+    El::Print(X, "raw read matrix from HDF5 (before row permutation)", dumpfout);
+    dumpfout.close();
+    */
+
+    // Permute the rows so they are on the right processes
+    // this current rank contains rows startRow : endRow
+    // row i of this chunk has the Elemental index X.GlobalRow(i),
+    // and we want it to map to the actual Elemental row i
+    log->info("Now permuting the rows");
+    El::DistPermutation perm;
+    perm.MakeIdentity(dims[0]);
+    /** this should work, but does not. I think setImage's behavior does depend on the 
+     * previous permutation rather than explicitly setting the image and having it never change
+    for(El::Int myCurRow = 0; myCurRow < X.LocalHeight(); ++myCurRow){
+      auto origin = X.GlobalRow(myCurRow);
+      auto dest = startRow + myCurRow;
+      perm.SetImage(origin, dest);
+    }
+    */
+
+    /**
+     * More complicated: create look-up tables to map between the row indices in the true matrix and the row indices in the Elemental matrix
+     * create the permutation that reorders the Elemental matrix's rows so that the row indices in the Elemental matrix match those in the original matrix by
+     * iterating over row indices, and for a given row index j, swapping the current elemental row j with the elemental row that contains the jth row of the
+     * original matrix. update the look-up tables as we swap. in one pass over the rows, this makes the permutation we need
+     **/
+    El::Int * trueToEl = new El::Int[dims[0]]; // maps from row index in true matrix to current row index in Elemental matrix
+    El::Int * ElToTrue = new El::Int[dims[0]]; // maps from elemental row index to current row index in true matrix
+    El::Int * temp = new El::Int[dims[0]]; 
+
+    for(El::Int curRow = 0; curRow < X.Height(); ++curRow) {
+      if (curRow >= startRow && curRow <= endRow) 
+        temp[curRow] = X.GlobalRow(curRow - startRow);
+      else
+        temp[curRow] = 0;
+    }
+    El::mpi::AllReduce(temp, trueToEl, dims[0], El::mpi::SUM, Comm.comm);
+
+    for(El::Int curRow = 0; curRow < X.Height(); ++curRow) {
+      if (X.IsLocalRow(curRow))
+        temp[curRow] = X.LocalRow(curRow) + startRow;
+      else
+        temp[curRow] = 0;
+    }
+    El::mpi::AllReduce(temp, ElToTrue, dims[0], El::mpi::SUM, Comm.comm);
+
+    for(El::Int curRow = 0; curRow < X.Height(); ++curRow) {
+      auto origin = trueToEl[curRow];
+      perm.Swap(origin, curRow);
+      trueToEl[ElToTrue[curRow]] = origin;
+      ElToTrue[origin] = ElToTrue[curRow];
+      trueToEl[curRow] = curRow;
+      ElToTrue[curRow] = curRow;
+    }
+    perm.PermuteRows(X);
+    //El::Display(X);
+
+    delete[] trueToEl;
+    delete[] ElToTrue;
+    delete[] temp;
+
+    // now replicate the cols of X to form the cols of Y
+    log->info("Replicating the rows locally");
+    Y.Resize(dims[0], replicas*dims[1]);
+    double * Ybuffer = Y.Buffer();
+    El::Int Yldim = Y.LDim();
+    for(El::Int j=0; j < Y.LocalWidth(); ++j)
+        for(El::Int i=0; i < Y.LocalHeight(); ++i)
+            Ybuffer[i + j*Yldim] = Xbuffer[i + (j % dims[1])*Xldim];
 
     status = H5Sclose(memspace_id);
     status = H5Sclose(space_id);
@@ -158,4 +230,5 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
 
     delete allRanksRows;
 }
+
 #endif

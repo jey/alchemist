@@ -40,6 +40,8 @@ if [ $WITH_BREW_PREREQS = 1 ]; then
   brew install cmake
   brew install boost --cc=gcc-7
   brew install boost-mpi --cc=gcc-7
+  # may need to do the following if get a dyld error about finding mpi libraries, see https://github.com/Homebrew/homebrew-science/issues/6425
+  #  brew reinstall --build-from-source boost-mpi
   brew install sbt
   brew install gmp
   brew install fftw

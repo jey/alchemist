@@ -266,10 +266,11 @@ void Driver::handle_RandomFourierFeatures() {
 void Driver::handle_ReadHDF5() {
     std::string fname = input.readString();
     std::string varname = input.readString();
+    int colreplicas = input.readInt();
     MatrixHandle A = registerMatrix(0, 0);
     
-    log->info("Reading variable {} from file {}", varname, fname);
-    ReadHDF5Command cmd(A, fname, varname);
+    log->info("Reading variable {} from file {} and replicating columnwise {} times", varname, fname, colreplicas);
+    ReadHDF5Command cmd(A, fname, varname, colreplicas);
     issue(cmd);
 
     El::Int numRows, numCols;

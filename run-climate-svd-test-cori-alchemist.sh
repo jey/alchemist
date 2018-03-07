@@ -19,6 +19,7 @@ fname=/global/cscratch1/sd/gittens/large-datasets/ocean.h5
 useAlc=1
 loadAlc=1
 varname=/rows
+colreplicas=2
 
 spark-submit --verbose\
   --driver-memory 120G\
@@ -31,7 +32,7 @@ spark-submit --verbose\
   --conf spark.eventLog.enabled=true\
   --conf spark.eventLog.dir=$SCRATCH/spark/event_logs\
   --class org.apache.spark.mllib.linalg.distributed.ClimateSVD\
-  test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $k $fname $useAlc $loadAlc $varname 2>&1 | tee test.log
+  test/target/scala-2.11/alchemist-tests-assembly-0.0.2.jar $k $fname $useAlc $loadAlc $varname $colreplicas 2>&1 | tee test.log
 
 stop-all.sh
 exit
