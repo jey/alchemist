@@ -96,7 +96,7 @@ object ClimateSVD {
             }
 
             var normalizeStart = ticks()
-            al.normalizeMatInPlace(alMat)
+            al.normalizeMatInPlace(alMatA)
             var normalizeEnd = ticks()
             println("Time cost for normalizing dataset in Alchemist")
             println((normalizeEnd - normalizeStart)/1000.0)

@@ -516,6 +516,7 @@ class Driver {
         // dummy process
         new ProcessBuilder("true")
       } else if(SProcess("uname -s").!!.stripLineEnd == "Darwin") {
+        System.err.println(s"Starting alchemist, listening on port ${listenSock.getLocalPort().toString()}")
         val numAlchemistWorkers = scala.sys.env.getOrElse("NUM_ALCHEMIST_RANKS", "4") // remember one of these will be the driver process
         new ProcessBuilder("mpirun", "-q", "-np", numAlchemistWorkers, "core/target/alchemist",
           "localhost", listenSock.getLocalPort().toString())

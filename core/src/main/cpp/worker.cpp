@@ -43,6 +43,16 @@ struct Worker {
   int main();
 };
 
+// Elemental has the bad habit of relaying out row distributed matrices when I call Gemm, so to avoid that huge memory cost, explicitly 
+// write a sane multiply routine for multiplying by local matrices
+// this routine takes in a VR, STAR by STAR, STAR and returns VR, STAR
+void SaneGemm(El::Orientation orientationOfA, El::Orientation orientationOfB, double alpha, 
+    const El::DistMatrix<double, El::VR, El::STAR> & A, const El::DistMatrix<double, El::STAR, El::STAR> & B, 
+    double beta, El::DistMatrix<double, El::VR, El::STAR> & C) {
+  El::Zeros(C, A.Height(), B.Width());
+  El::Gemm(orientationOfA, orientationOfB, alpha, A.LockedMatrix(), B.LockedMatrix(), beta, C.Matrix());
+}
+
 uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & centers,
     uint32_t * clusterSizes, std::vector<uint32_t> & rowAssignments, double & objVal) {
   uint32_t numCenters = centers.rows();
@@ -834,7 +844,9 @@ void TruncatedSVDCommand::run(Worker *self) const {
       //El::Copy(*A, *Aprox);
       self->log->info("Done relaying out A for GEMM");
       //auto Uprox = new El::DistMatrix<double>(U->Height(), U->Width(), self->grid);
-      El::Gemm(El::NORMAL, El::NORMAL, 1.0, *A, *Vlocal, 0.0, *U);
+      El::DistMatrix<double, El::VR, El::STAR> Ulocal(m, nconv, self->grid);
+      SaneGemm(El::NORMAL, El::NORMAL, 1.0, *A, *Vlocal, 0.0, Ulocal);
+      El::Copy(Ulocal, *U);
       self->log->info("Done with GEMM");
       //El::Copy(*Uprox, *U);
       //delete Uprox;

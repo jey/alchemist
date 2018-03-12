@@ -1,7 +1,7 @@
 .PHONY: default
 default:
 	$(MAKE) build
-	$(MAKE) check
+	#$(MAKE) check # out of date
 
 .PHONY: build
 build:
