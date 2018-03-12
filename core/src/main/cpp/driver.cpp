@@ -49,6 +49,7 @@ struct Driver {
   void handle_FactorizedCGSolver();
   void handle_RandomFourierFeatures();
   void handle_ReadHDF5();
+  void handle_normalizeMatInPlace();
 };
 
 Driver::Driver(const mpi::communicator &world, std::istream &is, std::ostream &os, std::shared_ptr<spdlog::logger> log) :
@@ -174,6 +175,10 @@ int Driver::main() {
         handle_ReadHDF5();
         break;
 
+      case 0x14:
+        handle_normalizeMatInPlace();
+        break;
+
       default:
         log->error("Unknown typeCode {#x}", typeCode);
         abort();
@@ -261,6 +266,17 @@ void Driver::handle_RandomFourierFeatures() {
     output.writeInt(X.id);
     output.flush();
     log->info("Finished computing Fourier Random Features, stored matrix as {}", X);
+}
+
+void Driver::handle_normalizeMatInPlace() {
+    MatrixHandle A{input.readInt()};
+    log->info("Normalizing matrix {} in place by zero meaning the rows and setting the columns to have stdev 1", A);
+
+    NormalizeMatInPlaceCommand cmd(A);
+    issue(cmd);
+
+    output.writeInt(0x1);
+    log->info("Finished normalizing matrix {} in place", A);
 }
 
 void Driver::handle_ReadHDF5() {
@@ -517,6 +533,11 @@ void Driver::handle_truncatedSVD() {
   log->info("Starting truncated SVD computation");
   MatrixHandle inputMat{input.readInt()};
   uint32_t k = input.readInt();
+  uint32_t method = input.readInt();
+
+  int LOCALEIGS = 0; // TODO: make these an enumeration, and global to Alchemist
+  int LOCALEIGSPRECOMPUTE = 1;
+  int DISTEIGS = 2; 
 
   MatrixHandle UHandle{nextMatrixId++};
   MatrixHandle SHandle{nextMatrixId++};
@@ -524,8 +545,18 @@ void Driver::handle_truncatedSVD() {
 
   auto m = matrices[inputMat].numRows;
   auto n = matrices[inputMat].numCols;
-  TruncatedSVDCommand cmd(inputMat, UHandle, SHandle, VHandle, k);
+  TruncatedSVDCommand cmd(inputMat, UHandle, SHandle, VHandle, k, method);
   issue(cmd);
+
+  if (method == DISTEIGS) {
+      log->info("using distributed mat-vec prods against A, then A tranpose");
+  }
+  if (method == LOCALEIGS) {
+      log->info("using local mat-vec prods computed on the fly against the local Gramians");
+  }
+  if (method == LOCALEIGSPRECOMPUTE) {
+      log->info("using local mat-vec prods against the precomputed local Gramians");
+  }
 
   ARrcSymStdEig<double> prob(n, k, "LM");
   uint32_t command;
@@ -544,8 +575,14 @@ void Driver::handle_truncatedSVD() {
     if (prob.GetIdo() == 1 || prob.GetIdo() == -1) {
       command = 1;
       mpi::broadcast(world, command, 0);
-      mpi::broadcast(world, prob.GetVector(), n, 0);
-      mpi::reduce(world, zerosVector.data(), n, prob.PutVector(), std::plus<double>(), 0);
+      if (method == LOCALEIGS || method == LOCALEIGSPRECOMPUTE) {
+          mpi::broadcast(world, prob.GetVector(), n, 0);
+          mpi::reduce(world, zerosVector.data(), n, prob.PutVector(), std::plus<double>(), 0);
+      }
+      if (method == DISTEIGS) {
+          world.send(1, 0, prob.GetVector(), n);
+          world.recv(1, 0, prob.PutVector(), n);
+      }
     }
   }
 

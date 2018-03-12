@@ -292,6 +292,23 @@ struct ReadHDF5Command : Command {
     
 };
 
+struct NormalizeMatInPlaceCommand : Command {
+    MatrixHandle A;
+
+    explicit NormalizeMatInPlaceCommand() {}
+
+    NormalizeMatInPlaceCommand(MatrixHandle A): A(A) {};
+
+    virtual void run(Worker *self) const;
+
+    template <typename Archive>
+    void serialize(Archive & ar, const unsigned version) {
+        ar & serialization::base_object<Command>(*this);
+        ar & A;
+    }
+
+};
+
 struct FactorizedCGSolverCommand : Command {
   MatrixHandle A;
   MatrixHandle B;
@@ -358,13 +375,14 @@ struct TruncatedSVDCommand : Command {
   MatrixHandle SHandle;
   MatrixHandle VHandle;
   uint32_t k;
+  uint32_t method;
 
   explicit TruncatedSVDCommand() {}
 
   TruncatedSVDCommand(MatrixHandle mat, MatrixHandle UHandle, 
-      MatrixHandle SHandle, MatrixHandle VHandle, uint32_t k) :
+      MatrixHandle SHandle, MatrixHandle VHandle, uint32_t k, uint32_t method) :
     mat(mat), UHandle(UHandle), SHandle(SHandle), VHandle(VHandle),
-    k(k) {}
+    k(k), method(method) {}
 
   virtual void run(Worker *self) const;
 
@@ -376,6 +394,7 @@ struct TruncatedSVDCommand : Command {
     ar & SHandle;
     ar & VHandle;
     ar & k;
+    ar & method;
   }
 };
 
@@ -546,5 +565,6 @@ BOOST_CLASS_EXPORT_KEY(alchemist::SkylarkLSQRSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::FactorizedCGSolverCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::RandomFourierFeaturesCommand);
 BOOST_CLASS_EXPORT_KEY(alchemist::ReadHDF5Command);
+BOOST_CLASS_EXPORT_KEY(alchemist::NormalizeMatInPlaceCommand);
 
 #endif

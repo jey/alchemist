@@ -318,10 +318,22 @@ class DriverClient(val istream: InputStream, val ostream: OutputStream) {
     return Xhandle
   }
 
-  def truncatedSVD(mat: MatrixHandle, k: Int) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
+  def normalizeMatInPlace(mat: MatrixHandle) : Unit = {
+    output.writeInt(0x14)
+    output.writeInt(mat.id)
+    output.flush()
+
+    if (input.readInt() != 0x1) {
+        throw new ProtocolError()
+    }
+
+  }
+
+  def truncatedSVD(mat: MatrixHandle, k: Int, method: Int ) : Tuple3[MatrixHandle, MatrixHandle, MatrixHandle] = {
     output.writeInt(0x8)
     output.writeInt(mat.id)
     output.writeInt(k)
+    output.writeInt(method)
     output.flush()
 
     if (input.readInt() != 0x1) {
@@ -608,9 +620,17 @@ class Alchemist(val mysc: SparkContext) {
     new AlMatrix(this, Xhandle)
   }
 
-  def truncatedSVD(mat: AlMatrix, k: Int) : Tuple3[AlMatrix, AlMatrix, AlMatrix] = {
-    val (uHandle, sHandle, vHandle) = client.truncatedSVD(mat.handle, k)
+    // 0 = local gramian mat-vecs on the fly,
+    // 1 = pre-compute local gramians and use on fly,
+    // 2 = distributed mat-vec prods (bad idea b/c relaysout for Gemv?)
+  def truncatedSVD(mat: AlMatrix, k: Int, method: Int = 0) : Tuple3[AlMatrix, AlMatrix, AlMatrix] = {
+    val (uHandle, sHandle, vHandle) = client.truncatedSVD(mat.handle, k, method)
     (new AlMatrix(this, uHandle), new AlMatrix(this, sHandle), new AlMatrix(this, vHandle))
+  }
+
+  // changes matrix so has mean zero rows and each column has stdev 1
+  def normalizeMatInPlace(mat: AlMatrix) : Unit = {
+    client.normalizeMatInPlace(mat.handle)
   }
 
   def readHDF5(fname: String, varname: String, colreplicas: Int = 1) : AlMatrix = {

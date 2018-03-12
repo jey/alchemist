@@ -701,7 +701,11 @@ void TruncatedSVDCommand::run(Worker *self) const {
   auto n = self->matrices[mat]->Width();
   auto A = self->matrices[mat].get();
 
-  // Relayout matrix so it is row-partitioned
+  int LOCALEIGS = 0; // TODO: make these an enumeration, and global to Alchemist
+  int LOCALEIGSPRECOMPUTE = 1;
+  int DISTEIGS = 2; 
+
+  // Relayout matrix so it is row-partitioned (TODO: only needed for LOCALEIGS and LOCALEIGSPRECOMPUTE modes)
   DistMatrix * workingMat;
   std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::VR, El::STAR>(m, n, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
   auto distData = A->DistData();
@@ -720,32 +724,66 @@ void TruncatedSVDCommand::run(Worker *self) const {
   // it makes more sense to compute A'*(A*x) separately each time (when we don't have enough memory for gramMat, or its too expensive
   // time-wise to precompute GramMat). trade-off depends on k (through the number of Arnoldi iterations we'll end up needing), the
   // amount of memory we have free to store GramMat, and the number of cores we have available
-  self->log->info("Computing the local contribution to A'*A");
-  self->log->info("Local matrix's dimensions are {}, {}", workingMat->LockedMatrix().Height(), workingMat->LockedMatrix().Width());
-  self->log->info("Storing A'*A in {},{} matrix", n, n);
-  auto startFillLocalMat = std::chrono::system_clock::now();
   El::Matrix<double> localGramChunk(n, n);
-  if (workingMat->LockedMatrix().Height() > 0)
-    El::Gemm(El::TRANSPOSE, El::NORMAL, 1.0, workingMat->LockedMatrix(), workingMat->LockedMatrix(), 0.0, localGramChunk);
-  else
-    El::Zeros(localGramChunk, n, n);
-  std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
-  self->log->info("Took {} ms to compute local contribution to A'*A", fillLocalMat_duration.count());
+
+  if (method == LOCALEIGSPRECOMPUTE) {
+      self->log->info("Computing the local contribution to A'*A");
+      self->log->info("Local matrix's dimensions are {}, {}", workingMat->LockedMatrix().Height(), workingMat->LockedMatrix().Width());
+      self->log->info("Storing A'*A in {},{} matrix", n, n);
+      auto startFillLocalMat = std::chrono::system_clock::now();
+      if (workingMat->LockedMatrix().Height() > 0)
+        El::Gemm(El::TRANSPOSE, El::NORMAL, 1.0, workingMat->LockedMatrix(), workingMat->LockedMatrix(), 0.0, localGramChunk);
+      else
+        El::Zeros(localGramChunk, n, n);
+      std::chrono::duration<double, std::milli> fillLocalMat_duration(std::chrono::system_clock::now() - startFillLocalMat);
+      self->log->info("Took {} ms to compute local contribution to A'*A", fillLocalMat_duration.count());
+  }
 
   uint32_t command;
   std::unique_ptr<double[]> vecIn{new double[n]};
-  El::Matrix<double> x(n, 1);
-  El::Matrix<double> y(n, 1);
-  x.LockedAttach(n, 1, vecIn.get(), 1);
+  El::Matrix<double> localx(n, 1);
+  El::Matrix<double> localintermed(workingMat->LocalHeight(), 1);
+  El::Matrix<double> localy(n, 1);
+  localx.LockedAttach(n, 1, vecIn.get(), 1);
+  auto distx = El::DistMatrix<double, El::STAR, El::STAR>(n, 1, self->grid);
+  auto distintermed = El::DistMatrix<double, El::STAR, El::STAR>(m, 1, self->grid);
 
   self->log->info("finished initialization for truncated SVD");
 
   while(true) {
     mpi::broadcast(self->world, command, 0);
-    if (command == 1) {
+    if (command == 1 && method == LOCALEIGS) {
+        mpi::broadcast(self->world, vecIn.get(), n, 0);
+        El::Gemv(El::NORMAL, 1.0, workingMat->LockedMatrix(), localx, 0.0, localintermed);
+        El::Gemv(El::TRANSPOSE, 1.0, workingMat->LockedMatrix(), localintermed, 0.0, localy);
+        mpi::reduce(self->world, localy.LockedBuffer(), n, std::plus<double>(), 0);
+    }
+    if (command == 1 && method == LOCALEIGSPRECOMPUTE) {
       mpi::broadcast(self->world, vecIn.get(), n, 0);
-      El::Gemv(El::NORMAL, 1.0, localGramChunk, x, 0.0, y);
-      mpi::reduce(self->world, y.LockedBuffer(), n, std::plus<double>(), 0);
+      El::Gemv(El::NORMAL, 1.0, localGramChunk, localx, 0.0, localy);
+      mpi::reduce(self->world, localy.LockedBuffer(), n, std::plus<double>(), 0);
+    } 
+    if (command == 1 && method == DISTEIGS) {
+      El::Zeros(distx, n, 1);
+      self->log->info("Computing a mat-vec prod against A^TA");
+      if(self->world.rank() == 1) {
+          self->world.recv(0, 0, vecIn.get(), n);
+          distx.Reserve(n);
+          for(El::Int row=0; row < n; row++)
+              distx.QueueUpdate(row, 0, vecIn[row]);
+      }
+      else {
+          distx.Reserve(0);
+      }
+      distx.ProcessQueues();
+      self->log->info("Retrieved x, computing A^TAx");
+      El::Gemv(El::NORMAL, 1.0, *workingMat, distx, 0.0, distintermed);
+      self->log->info("Computed y = A*x");
+      El::Gemv(El::TRANSPOSE, 1.0, *workingMat, distintermed, 0.0, distx);
+      self->log->info("Computed x = A^T*y");
+      if(self->world.rank() == 1) {
+          self->world.send(0, 0, distx.LockedBuffer(), n);
+      }
     }
     if (command == 2) {
       uint32_t nconv;
@@ -812,6 +850,67 @@ void TruncatedSVDCommand::run(Worker *self) const {
   }
 
   self->world.barrier();
+}
+
+void NormalizeMatInPlaceCommand::run(Worker *self) const {
+    auto m = self->matrices[A]->Height();
+    auto n = self->matrices[A]->Width();
+    auto matA = self->matrices[A].get();
+    auto localRows = matA->LockedMatrix();
+
+    auto rowMeans = El::DistMatrix<double, El::STAR, El::STAR>(n, 1, self->grid);
+    auto distOnes = El::DistMatrix<double, El::STAR, El::STAR>(m, 1, self->grid);
+    El::Matrix<double>localRowMeans;
+    El::Matrix<double> localOnes;
+
+    // compute the rowMeans
+    // explicitly compute matrix vector products to avoid relayouts from distributed Gemv!
+    El::Ones(localOnes, localRows.Height(), 1);
+    El::Gemv(El::TRANSPOSE, 1.0, localRows, localOnes, 0.0, localRowMeans);
+    El::Zeros(rowMeans, n, 1);
+    rowMeans.Reserve(n);
+    for(El::Int col=0; col < n; col++)
+        rowMeans.QueueUpdate(col, 1, localRowMeans.Get(col, 1));
+    rowMeans.ProcessQueues();
+
+    // subtract off the row means
+    El::Ones(distOnes, m, 1);
+    El::Ger(-1.0, *matA, distOnes, rowMeans); 
+
+    // compute the column variances
+    auto colVariances = El::DistMatrix<double, El::STAR, El::STAR>(n, 1, self->grid);
+    auto localSquaredEntries = El::Matrix<double>(localRows.Height(), n);
+    auto localColVariances = El::Matrix<double>(n, 1);
+
+    El::Hadamard(localRows, localRows, localSquaredEntries);
+    El::Gemv(El::TRANSPOSE, 1.0, localSquaredEntries, localOnes, 0.0, localColVariances);
+    El::Zeros(colVariances, n, 1);
+    colVariances.Reserve(n);
+    for(El::Int col=0; col < n; col++)
+        colVariances.QueueUpdate(col, 1, localColVariances.Get(col, 1));
+    colVariances.ProcessQueues();
+
+    // rescale by the inv col stdevs
+    auto invColStdevs = El::DistMatrix<double, El::STAR, El::STAR>(n ,1, self->grid);
+    El::Zeros(invColStdevs, n, 1);
+    if(invColStdevs.DistRank() == 0) {
+        invColStdevs.Reserve(n);
+        for(El::Int col = 0; col < n; ++col) {
+            auto curInvStdev = colVariances.Get(col, 1);
+            if (curInvStdev < 1e-5) {
+                curInvStdev = 1.0;
+            } else {
+                curInvStdev = 1/sqrt(curInvStdev);
+            }
+            invColStdevs.QueueUpdate(col, 1, curInvStdev);
+        }
+    }
+    else {
+        invColStdevs.Reserve(0);
+    }
+    invColStdevs.ProcessQueues();
+
+    El::DiagonalScale(El::RIGHT, El::NORMAL, invColStdevs, *matA);
 }
 
 void TransposeCommand::run(Worker *self) const {

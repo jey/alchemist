@@ -95,6 +95,13 @@ object ClimateSVD {
                 println(" ")
             }
 
+            var normalizeStart = ticks()
+            al.normalizeMatInPlace(alMat)
+            var normalizeEnd = ticks()
+            println("Time cost for normalizing dataset in Alchemist")
+            println((normalizeEnd - normalizeStart)/1000.0)
+            println(" ")
+
             var computeStart = ticks()
             val (alU, alS, alV) = al.truncatedSVD(alMatA, k) // returns sing vals in increas
             var computeEnd = ticks()
@@ -124,6 +131,7 @@ object ClimateSVD {
             println(" ")
 
             // Compute SVD using Spark
+            // TODO: normalize data before SVD
             var computeStart = ticks()
             val svd = rdd.toRowMatrix().computeSVD(k, computeU = true, 1e-9, 300, 1e-10, "auto") // default Spark computeSVD arguments
             svd.U.rows.count()
