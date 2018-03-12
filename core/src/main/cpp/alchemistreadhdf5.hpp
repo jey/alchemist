@@ -148,37 +148,22 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
             Xbuffer[i + j*Xldim] = tempTarget[j + i*dims[1]];
     delete[] tempTarget;
 
-    // Output raw read matrix from HDF5 before permutation for error checking
     /*
-    log->info("Dumping raw matrix to file for debugging");
-    std::ofstream dumpfout;
-    dumpfout.open("matdump.out", std::ios::trunc);
-    El::Print(X, "raw read matrix from HDF5 (before row permutation)", dumpfout);
-    dumpfout.close();
-    */
-
+     * Temporarily commented out, too slow on Cori: maybe need to construct the permutation on only one rank to prevent redundant communications 
+     *
+     *
     // Permute the rows so they are on the right processes
     // this current rank contains rows startRow : endRow
     // row i of this chunk has the Elemental index X.GlobalRow(i),
     // and we want it to map to the actual Elemental row i
-    log->info("Now computing row permutation");
+    log->info("TODO: Now computing row permutation");
     El::DistPermutation perm;
     perm.MakeIdentity(dims[0]);
-    /** this should work, but does not. I think setImage's behavior does depend on the 
-     * previous permutation rather than explicitly setting the image and having it never change
-    for(El::Int myCurRow = 0; myCurRow < X.LocalHeight(); ++myCurRow){
-      auto origin = X.GlobalRow(myCurRow);
-      auto dest = startRow + myCurRow;
-      perm.SetImage(origin, dest);
-    }
-    */
 
-    /**
      * More complicated: create look-up tables to map between the row indices in the true matrix and the row indices in the Elemental matrix
      * create the permutation that reorders the Elemental matrix's rows so that the row indices in the Elemental matrix match those in the original matrix by
      * iterating over row indices, and for a given row index j, swapping the current elemental row j with the elemental row that contains the jth row of the
      * original matrix. update the look-up tables as we swap. in one pass over the rows, this makes the permutation we need
-     **/
     El::Int * trueToEl = new El::Int[dims[0]]; // maps from row index in true matrix to current row index in Elemental matrix
     El::Int * ElToTrue = new El::Int[dims[0]]; // maps from elemental row index to current row index in true matrix
     El::Int * temp = new El::Int[dims[0]]; 
@@ -207,13 +192,13 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
       trueToEl[curRow] = curRow;
       ElToTrue[curRow] = curRow;
     }
-    log->info("Now permuting the rows");
+    log->info("TODO: permute the rows or return the permutation matrix for later use");
     perm.PermuteRows(X);
-    //El::Display(X);
 
     delete[] trueToEl;
     delete[] ElToTrue;
     delete[] temp;
+    */
 
     // now replicate the cols of X to form the cols of Y
     log->info("Replicating the rows locally");

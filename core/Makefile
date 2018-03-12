@@ -43,7 +43,7 @@ OBJ_FILES = \
 	$(TARGET_PATH)/worker.o \
 	#
 
-$(TARGET_PATH)/%.o: $(SRC_PATH)/cpp/%.cpp $(SRC_PATH)/cpp/alchemist.h
+$(TARGET_PATH)/%.o: $(SRC_PATH)/cpp/%.cpp $(SRC_PATH)/cpp/alchemist.h $(SRC_PATH)/cpp/alchemistreadhdf5.hpp
 	$(CXX) -c $(CXXFLAGS) $< -o $@
 
 .PHONY: default

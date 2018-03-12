@@ -1,8 +1,7 @@
 #!/bin/bash
 
 #SBATCH -p debug
-##SBATCH -N 14
-#SBATCH -N 55
+#SBATCH -N 14
 #SBATCH -t 00:30:00
 #SBATCH -e mysparkjob_%j.err
 #SBATCH -o mysparkjob_%j.out
@@ -10,8 +9,7 @@
 #module load collectl
 #start-collectl.sh 
 
-#source setup/cori-start-alchemist.sh 12 2
-source setup/cori-start-alchemist.sh 40 2
+source setup/cori-start-alchemist.sh 12 2
 sleep 15
 
 # 6177583 by 8096 => 400 GB dataset
