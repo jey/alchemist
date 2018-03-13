@@ -48,9 +48,10 @@ struct Worker {
 // this routine takes in a VR, STAR by STAR, STAR and returns VR, STAR
 void SaneGemm(El::Orientation orientationOfA, El::Orientation orientationOfB, double alpha, 
     const El::DistMatrix<double, El::VR, El::STAR> & A, const El::DistMatrix<double, El::STAR, El::STAR> & B, 
-    double beta, El::DistMatrix<double, El::VR, El::STAR> & C) {
-  El::Zeros(C, A.Height(), B.Width());
+    double beta, El::DistMatrix<double, El::VR, El::STAR> & C, std::shared_ptr<spdlog::logger> & log) {
+  log->info("doing GEMM");
   El::Gemm(orientationOfA, orientationOfB, alpha, A.LockedMatrix(), B.LockedMatrix(), beta, C.Matrix());
+  log->info("done GEMM");
 }
 
 uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & centers,
@@ -709,34 +710,22 @@ void KMeansCommand::run(Worker *self) const {
 void TruncatedSVDCommand::run(Worker *self) const {
   auto m = self->matrices[mat]->Height();
   auto n = self->matrices[mat]->Width();
-  auto A = self->matrices[mat].get();
+  auto workingMat = self->matrices[mat].get();
 
   int LOCALEIGS = 0; // TODO: make these an enumeration, and global to Alchemist
   int LOCALEIGSPRECOMPUTE = 1;
   int DISTEIGS = 2; 
 
-  // Relayout matrix so it is row-partitioned (TODO: only needed for LOCALEIGS and LOCALEIGSPRECOMPUTE modes)
-  DistMatrix * workingMat;
-  std::unique_ptr<DistMatrix> dataMat_uniqptr{new El::DistMatrix<double, El::VR, El::STAR>(m, n, self->grid)}; // so will delete this relayed out matrix once kmeans goes out of scope
-  auto distData = A->DistData();
-  if (distData.colDist == El::VR && distData.rowDist == El::STAR) {
-    workingMat = A;
-  } else {
-    self->log->info("detected matrix is not row-partitioned, so relayout-ing a copy to row-partitioned");
-    workingMat = dataMat_uniqptr.get();
-    auto relayoutStart = std::chrono::system_clock::now();
-    El::Copy(*A, *workingMat); // relayouts data so it is row-wise partitioned
-    std::chrono::duration<double, std::milli> relayoutDuration(std::chrono::system_clock::now() - relayoutStart);
-    self->log->info("relayout took {} ms", relayoutDuration.count());
-  }
+  // Assume matrix is row-partitioned b/c relaying it out doubles memory requirements
 
   //NB: sometimes it makes sense to precompute the gramMat (when it's cheap (we have a lot of cores and enough memory), sometimes
   // it makes more sense to compute A'*(A*x) separately each time (when we don't have enough memory for gramMat, or its too expensive
   // time-wise to precompute GramMat). trade-off depends on k (through the number of Arnoldi iterations we'll end up needing), the
   // amount of memory we have free to store GramMat, and the number of cores we have available
-  El::Matrix<double> localGramChunk(n, n);
+  El::Matrix<double> localGramChunk;
 
   if (method == LOCALEIGSPRECOMPUTE) {
+      localGramChunk.Resize(n, n);
       self->log->info("Computing the local contribution to A'*A");
       self->log->info("Local matrix's dimensions are {}, {}", workingMat->LockedMatrix().Height(), workingMat->LockedMatrix().Width());
       self->log->info("Storing A'*A in {},{} matrix", n, n);
@@ -805,9 +794,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       mpi::broadcast(self->world, singValsSq.data(), nconv, 0);
       self->log->info("Received the right eigenvectors and the eigenvalues");
 
-      // let U,S,V also be stored as row-distributed, otherwise A will be relaid out when doing the 
-      // matrix multiply, which will increase the memory usage
-      DistMatrix * U = new El::DistMatrix<double, El::VR, El::STAR>(m, nconv, self->grid);
+      auto U = new El::DistMatrix<double, El::VR, El::STAR>(m, nconv, self->grid);
       DistMatrix * S = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * Sinv = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * V = new El::DistMatrix<double, El::VR, El::STAR>(n, nconv, self->grid);
@@ -835,23 +822,8 @@ void TruncatedSVDCommand::run(Worker *self) const {
 
       // form U
       self->log->info("computing A*V");
-      self->log->info("A is {}-by-{}, V is {}-by-{}, the resulting matrix should be {}-by-{}", A->Height(), A->Width(), V->Height(), V->Width(), U->Height(), U->Width());
-      self->log->info("Relaying out A,V for GEMM");
-      //auto Aprox = new El::DistMatrix<double>(A->Height(), A->Width(), self->grid);
-      //auto Vprox = new El::DistMatrix<double>(V->Height(), V->Width(), self->grid);
-      //El::Copy(*V, *Vprox);
-      self->log->info("Done relaying out V for GEMM");
-      //El::Copy(*A, *Aprox);
-      self->log->info("Done relaying out A for GEMM");
-      //auto Uprox = new El::DistMatrix<double>(U->Height(), U->Width(), self->grid);
-      El::DistMatrix<double, El::VR, El::STAR> Ulocal(m, nconv, self->grid);
-      SaneGemm(El::NORMAL, El::NORMAL, 1.0, *A, *Vlocal, 0.0, Ulocal);
-      El::Copy(Ulocal, *U);
-      self->log->info("Done with GEMM");
-      //El::Copy(*Uprox, *U);
-      //delete Uprox;
-      //delete Aprox;
-      //delete Vprox;
+      self->log->info("A is {}-by-{}, V is {}-by-{}, the resulting matrix should be {}-by-{}", workingMat->Height(), workingMat->Width(), V->Height(), V->Width(), U->Height(), U->Width());
+      SaneGemm(El::NORMAL, El::NORMAL, 1.0, *workingMat, *Vlocal, 0.0, *U, self->log);
       self->log->info("done computing A*V");
       // TODO: do a QR instead to ensure stability, but does column pivoting so would require postprocessing S,V to stay consistent
       El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);

@@ -120,7 +120,6 @@ void alchemistReadHDF5(std::string fnameIn, std::string varName, DistMatrixType 
         status = H5Sselect_hyperslab(memspace_id, H5S_SELECT_SET, memoffset, NULL, count, NULL);
 
         log->info("On read {} of {}, selected and reading rows {}--{}", curReadNum + 1, numReadChunks, offset[0], offset[0] + count[0] - 1);
-        //status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, space_id, plist_id, X.Buffer() + memoffset[0]*dims[1]);
         status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, space_id, plist_id, tempTarget);
         if (status < 0) {
             log->info("Error reading from file");

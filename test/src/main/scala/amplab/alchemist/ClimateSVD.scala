@@ -94,13 +94,14 @@ object ClimateSVD {
                 println((txEnd - txStart)/1000.0)
                 println(" ")
             }
-
+/*
             var normalizeStart = ticks()
             al.normalizeMatInPlace(alMatA)
             var normalizeEnd = ticks()
             println("Time cost for normalizing dataset in Alchemist")
             println((normalizeEnd - normalizeStart)/1000.0)
             println(" ")
+            */
 
             var computeStart = ticks()
             val (alU, alS, alV) = al.truncatedSVD(alMatA, k) // returns sing vals in increas
