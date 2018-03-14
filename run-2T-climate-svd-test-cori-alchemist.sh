@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -q premium
-#SBATCH -N 310
+#SBATCH -N 278
 #SBATCH -t 00:07:00
 #SBATCH -J eight-replicated
 #SBATCH --mail-user=gittea@rpi.edu
@@ -12,7 +12,7 @@
 #module load collectl
 #start-collectl.sh 
 
-source setup/cori-start-alchemist.sh 308 2
+source setup/cori-start-alchemist.sh 276 2
 sleep 15
 
 # 2.2TB dataset => (18 machines to hold in memory one copy of this dataset)

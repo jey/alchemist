@@ -15,6 +15,7 @@
 #include "utils.hpp"
 #include "factorizedCG.hpp"
 #include "alchemistreadhdf5.hpp"
+#include <time.h>
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -798,6 +799,7 @@ void TruncatedSVDCommand::run(Worker *self) const {
       DistMatrix * S = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * Sinv = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * V = new El::DistMatrix<double, El::VR, El::STAR>(n, nconv, self->grid);
+      // maintaining a copy of V on each rank is expensive memory-wise, but seems to be only way to avoid GEMM relaying out and requiring even more memory
       DistMatrix * Vlocal = new El::DistMatrix<double, El::STAR, El::STAR>(n, nconv, self->grid);
 
       ENSURE(self->matrices.insert(std::make_pair(UHandle, std::unique_ptr<DistMatrix>(U))).second);
@@ -810,7 +812,9 @@ void TruncatedSVDCommand::run(Worker *self) const {
         for(El::Int colIdx=0; colIdx < (El::Int) nconv; colIdx++)
           if(V->IsLocal(rowIdx, colIdx))
             V->SetLocal(V->LocalRow(rowIdx), V->LocalCol(colIdx), rightEigs(rowIdx,colIdx));
-      El::Copy(*V, *Vlocal);
+      rightEigs.resize(0,0); // clear any memory this temporary variable used (a lot, since it's on every rank)
+      El::Copy(*V, *Vlocal); // make V store on every rank
+
       // populate S, Sinv
       for(El::Int idx=0; idx < (El::Int) nconv; idx++) {
         if(S->IsLocal(idx, 0))
@@ -936,11 +940,11 @@ void MatrixMulCommand::run(Worker *self) const {
   auto m = self->matrices[inputA]->Height();
   auto n = self->matrices[inputB]->Width();
   DistMatrix * matrix = new El::DistMatrix<double, El::VR, El::STAR>(m, n, self->grid);
+  //El::Zero(matrix);
   ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
   El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
-  //El::Display(*self->matrices[inputA], "A:");
-  //El::Display(*self->matrices[inputB], "B:");
-  //El::Display(*matrix, "A*B:");
+  // Avoids communicating the A (hopefully means the distreadwrite proxy is not expensive)
+  //El::gemm::SUMMA_NNA(1.0, *self->matrices[inputA], *self->matrices[inputB], *matrix);
   self->world.barrier();
 }
 
@@ -1359,9 +1363,14 @@ int Worker::main() {
   // TODO: make thread-safe
   // TODO: currently both stderr and logfile share the same report levels (can't have two sinks on same log with different level); use a split sink
   //  a la https://github.com/gabime/spdlog/issues/345 to allow stderr to print error messages only
+  time_t rawtime = time(0);
+  struct tm * timeinfo = localtime(&rawtime);
+  char buf[80];
+  strftime(buf, 80, "%F-%T", timeinfo);
   std::vector<spdlog::sink_ptr> sinks;
   auto stderr_sink = std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>(); // with ANSI color
-  auto logfile_sink = std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("rank-%d.log") % world.rank()));
+  auto logfile_sink = std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("rank-%d-%s.log") % world.rank() % buf));
+
   stderr_sink->set_level(spdlog::level::err);
   logfile_sink->set_level(spdlog::level::info); // change to warn for production
   sinks.push_back(stderr_sink);

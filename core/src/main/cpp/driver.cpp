@@ -13,6 +13,7 @@
 #include <boost/tokenizer.hpp>
 #include "arpackpp/arrssym.h"
 #include "spdlog/spdlog.h"
+#include <time.h>
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -75,15 +76,6 @@ void Driver::reshapeMatrix(MatrixHandle handle, size_t numRows, size_t numCols) 
 }
 
 int Driver::main() {
-  //log to console as well as file (single-threaded logging)
-  //TODO: allow to specify log directory, log level, etc.
-  std::vector<spdlog::sink_ptr> sinks;
-  sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>());
-  sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>("driver.log"));
-  log = std::make_shared<spdlog::logger>("driver", std::begin(sinks), std::end(sinks));
-  log->flush_on(spdlog::level::info); // flush whenever warning or more critical message is logged
-  log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
-  log->info("Started Driver");
 
   // get WorkerInfo
   auto numWorkers = world.size() - 1;
@@ -769,10 +761,14 @@ inline bool exist_test (const std::string& name) {
 int driverMain(const mpi::communicator &world, int argc, char *argv[]) {
   //log to console as well as file (single-threaded logging)
   //TODO: allow to specify log directory, log level, etc.
+  time_t rawtime = time(0);
+  struct tm * timeinfo = localtime(&rawtime);
+  char buf[80];
+  strftime(buf, 80, "%F-%T", timeinfo);
   std::shared_ptr<spdlog::logger> log;
   std::vector<spdlog::sink_ptr> sinks;
   sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stderr_sink_st>());
-  sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>("driver.log"));
+  sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_st>(str(format("driver-%s.log") % buf)));
   log = std::make_shared<spdlog::logger>("driver", std::begin(sinks), std::end(sinks));
   //log->flush_on(spdlog::level::warn); // flush whenever warning or more critical message is logged
   //log->set_level(spdlog::level::info); // only log stuff at or above info level, for production
