@@ -9,6 +9,7 @@ set -o errexit
 #
 #   go to the directory that will serve as the alchemist root directory
 #   git clone https://github.com/alexgittens/alchemist.git
+#   # MAKE SURE the correct WITH_* flags are set to 1
 #   bash ./alchemist/setup/macos-bootstrap.sh
 
 ALROOT=$PWD
@@ -20,15 +21,15 @@ MAKE_THREADS=8
 # NOTE: skylark doesn't link against the available version of COMBBLAS, so enabling
 # COMBBLAS will build it, but skylark will not use it
 WITH_BREW_PREREQS=0
-WITH_EL=0
+WITH_EL=1
 WITH_COMBBLAS=0
-WITH_RANDOM123=0
-WITH_HDF5=0
+WITH_RANDOM123=1
+WITH_HDF5=1
 WITH_SKYLARK=1
-WITH_ARPACK=0
-WITH_ARPACKPP=0
-WITH_EIGEN=0
-WITH_SPDLOG=0
+WITH_ARPACK=1
+WITH_ARPACKPP=1
+WITH_EIGEN=1
+WITH_SPDLOG=1
 
 # install brewable prereqs if not already there
 # TODO: really don't like installing brew packages w/ nonstandard compiler, but works for now
