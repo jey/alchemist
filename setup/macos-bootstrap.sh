@@ -144,7 +144,7 @@ if [ "$WITH_HDF5" = 1 ]; then
 		--with-szlib=/usr/local/Cellar/szip/2.1.1/include/,/usr/local/Cellar/szip/2.1.1/lib/ 
 	nice make -j"$MAKE_THREADS"
 	make install
-  cd ../..
+  cd ..
 fi
 
 # Skylark
