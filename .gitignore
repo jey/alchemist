@@ -6,5 +6,6 @@ prep.sh
 *.log
 tmp/
 *.out
+*.h5
 data/mnist.t
 lib/

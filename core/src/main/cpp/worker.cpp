@@ -55,6 +55,37 @@ void SaneGemm(El::Orientation orientationOfA, El::Orientation orientationOfB, do
   log->info("done GEMM");
 }
 
+// "fast" gemm for multiplying [VR,STAR] matrices in normal orientation and storing as [VR, STAR]
+// overhead: additional maxPanelSize GB (1 for now) per rank => at most numcores * maxPanelGB per machine
+void Gemm(double alpha, const El::DistMatrix<double, El::VR, El::STAR> & A, const El::DistMatrix<double, El::VR, El::STAR> & B,
+    double beta, El::DistMatrix<double, El::VR, El::STAR> & C, std::shared_ptr<spdlog::logger> & log) {
+  auto m = A.Height();
+  auto n = A.Width();
+  auto k = B.Width();
+  assert(n == B.Height());
+
+  El::Int maxPanelSize = 1; // maximum panel size (will be stored on each process) in GB
+  El::Int maxPanelWidth = std::max( (int) std::floor( (maxPanelSize*1000*1000*1000)/(8*n) ), 1);
+  El::Int numPanels = (int) std::ceil(k/maxPanelWidth);
+
+  El::DistMatrix<double, El::STAR, El::STAR> curBPanel;
+  for(int curPanelNum = 0; curPanelNum < numPanels; ++curPanelNum) {
+    El::Int startCol = curPanelNum*maxPanelWidth;
+    El::Int lastCol = std::min(startCol + maxPanelWidth - 1, k - 1);
+    El::Int curPanelWidth = lastCol - startCol + 1;
+
+    El::Zeros(curBPanel, n, curPanelWidth);
+    curBPanel.Reserve(curBPanel.LocalHeight()*curPanelWidth);
+    for(El::Int row = 0; row < B.LocalHeight(); ++row)
+      for(El::Int col = startCol; col <= lastCol; ++col)
+        curBPanel.QueueUpdate(B.GlobalRow(row), col, B.LockedMatrix().Get(row, col));
+    curBPanel.ProcessQueues();
+
+    El::Matrix<double> curCPanel = C.Matrix()(El::Range<El::Int>(0, m), El::Range<El::Int>(startCol, lastCol+1));
+    El::Gemm(El::NORMAL, El::NORMAL, alpha, A.LockedMatrix(), curBPanel.LockedMatrix(), beta, curCPanel);
+  }
+}
+
 uint32_t updateAssignmentsAndCounts(MatrixXd const & dataMat, MatrixXd const & centers,
     uint32_t * clusterSizes, std::vector<uint32_t> & rowAssignments, double & objVal) {
   uint32_t numCenters = centers.rows();
