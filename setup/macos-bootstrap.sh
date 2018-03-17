@@ -15,7 +15,7 @@ set -o errexit
 ALROOT=$PWD
 ALPREFIX=$ALROOT/bins
 
-MAKE_THREADS=8
+MAKE_THREADS=4
 
 # Set the following flags to indicate what needs to be installed
 # NOTE: skylark doesn't link against the available version of COMBBLAS, so enabling
@@ -47,7 +47,7 @@ if [ $WITH_BREW_PREREQS = 1 ]; then
   brew install gmp
   brew install fftw
   brew install zlib
-  brew install szlib
+  brew install szip
 fi
 
 export CC="gcc-7"
@@ -74,7 +74,7 @@ if [ "$WITH_EL" = 1 ]; then
   cd build
   # had to set LDFLAGS using output of mpicc --showme:link
   # otherwise Parmetis build fails with a link error showing it can't find MPI
-  LDFLAGS="-L/usr/local/opt/libevent/lib -L/usr/local/Cellar/open-mpi/3.0.0_2/lib -lmpi" cmake \
+  LDFLAGS="-L/usr/local/opt/libevent/lib -L/usr/local/opt/open-mpi/lib -lmpi" cmake \
     -DCMAKE_BUILD_TYPE=Release \
     -DEL_IGNORE_OSX_GCC_ALIGNMENT_PROBLEM=ON \
     -DCMAKE_INSTALL_PREFIX=$ALPREFIX \
@@ -124,24 +124,20 @@ if [ "$WITH_RANDOM123" = 1 ]; then
 fi
 
 # HDF5
-# TODO: figure out how to use CMAKE so it can detect zlib and szip
-# for now, have to manually update the library paths in the install code if versions of packages change
-# the include and lib for the szlib and zlib packages were obtained using brew ls 'package'
-# ditto for the cflags and ldflags for open-mpi: I used mpicc --showme:compile / --showme:link
 if [ "$WITH_HDF5" = 1 ]; then
 	if [ ! -d hdf5-1.10.1 ]; then
 		curl -L https://support.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.10.1.tar > hdf5-1.10.1.tar
 		tar xzf hdf5-1.10.1.tar
 	fi
 	cd hdf5-1.10.1
-  CFLAGS="-I/usr/local/Cellar/open-mpi/3.0.0_2/include" \
-  FCFLAGS="-I/usr/local/Cellar/open-mpi/3.0.0_2/include" \
-  LDFLAGS="-L/usr/local/opt/libevent/lib -L/usr/local/Cellar/open-mpi/3.0.0_2/lib -lmpi -lmpi_mpifh" \
+  CFLAGS="-I/usr/local/opt/open-mpi/include" \
+  FCFLAGS="-I/usr/local/opt/open-mpi/include" \
+  LDFLAGS="-L/usr/local/opt/libevent/lib -L/usr/local/opt/open-mpi/lib -lmpi -lmpi_mpifh" \
   ./configure --prefix="$ALPREFIX" \
 		--enable-fortran \
     --enable-parallel \
 		--with-zlib=/usr/local/opt/zlib/include,/usr/local/opt/zlib/lib \
-		--with-szlib=/usr/local/Cellar/szip/2.1.1/include/,/usr/local/Cellar/szip/2.1.1/lib/ 
+		--with-szlib=/usr/local/opt/szip/include/,/usr/local/opt/szip/lib/ 
 	nice make -j"$MAKE_THREADS"
 	make install
   cd ..
