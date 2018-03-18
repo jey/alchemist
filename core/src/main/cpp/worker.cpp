@@ -44,18 +44,7 @@ struct Worker {
   int main();
 };
 
-// Elemental has the bad habit of relaying out row distributed matrices when I call Gemm, so to avoid that huge memory cost, explicitly 
-// write a sane multiply routine for multiplying by local matrices
-// this routine takes in a VR, STAR by STAR, STAR and returns VR, STAR
-void SaneGemm(El::Orientation orientationOfA, El::Orientation orientationOfB, double alpha, 
-    const El::DistMatrix<double, El::VR, El::STAR> & A, const El::DistMatrix<double, El::STAR, El::STAR> & B, 
-    double beta, El::DistMatrix<double, El::VR, El::STAR> & C, std::shared_ptr<spdlog::logger> & log) {
-  log->info("doing GEMM");
-  El::Gemm(orientationOfA, orientationOfB, alpha, A.LockedMatrix(), B.LockedMatrix(), beta, C.Matrix());
-  log->info("done GEMM");
-}
-
-// "fast" gemm for multiplying [VR,STAR] matrices in normal orientation and storing as [VR, STAR]
+// custom GEMM for multiplying [VR,STAR] matrices in normal orientation and storing as [VR, STAR]
 // overhead: additional maxPanelSize GB (1 for now) per rank => at most numcores * maxPanelGB per machine
 void Gemm(double alpha, const El::DistMatrix<double, El::VR, El::STAR> & A, const El::DistMatrix<double, El::VR, El::STAR> & B,
     double beta, El::DistMatrix<double, El::VR, El::STAR> & C, std::shared_ptr<spdlog::logger> & log) {
@@ -65,24 +54,32 @@ void Gemm(double alpha, const El::DistMatrix<double, El::VR, El::STAR> & A, cons
   assert(n == B.Height());
 
   El::Int maxPanelSize = 1; // maximum panel size (will be stored on each process) in GB
-  El::Int maxPanelWidth = std::max( (int) std::floor( (maxPanelSize*1000*1000*1000)/(8*n) ), 1);
-  El::Int numPanels = (int) std::ceil(k/maxPanelWidth);
+  El::Int maxPanelWidth = std::max( (int) std::floor( (maxPanelSize*1000*1000*1000)/((double)8*n) ), 1);
+  El::Int numPanels = (int) std::ceil(k/(double)maxPanelWidth);
+  log->debug("Using {} panels", numPanels);
 
-  El::DistMatrix<double, El::STAR, El::STAR> curBPanel;
+  El::DistMatrix<double, El::STAR, El::STAR> curBPanel(B.Grid());
+  El::Matrix<double> curCPanel;
   for(int curPanelNum = 0; curPanelNum < numPanels; ++curPanelNum) {
     El::Int startCol = curPanelNum*maxPanelWidth;
     El::Int lastCol = std::min(startCol + maxPanelWidth - 1, k - 1);
     El::Int curPanelWidth = lastCol - startCol + 1;
 
+    log->debug("Creating next B panel");
     El::Zeros(curBPanel, n, curPanelWidth);
     curBPanel.Reserve(curBPanel.LocalHeight()*curPanelWidth);
     for(El::Int row = 0; row < B.LocalHeight(); ++row)
       for(El::Int col = startCol; col <= lastCol; ++col)
         curBPanel.QueueUpdate(B.GlobalRow(row), col, B.LockedMatrix().Get(row, col));
     curBPanel.ProcessQueues();
+    log->debug("Finished creating current B panel");
 
-    El::Matrix<double> curCPanel = C.Matrix()(El::Range<El::Int>(0, m), El::Range<El::Int>(startCol, lastCol+1));
+    log->debug("Creating next C panel");
+    El::View(curCPanel, C.Matrix(), El::Range<El::Int>(0, C.LocalHeight()), El::Range<El::Int>(startCol, lastCol+1));
+    log->debug("Finished creating current C panel");
+    log->debug("Multiplying A by current B panel, storing into current C panel");
     El::Gemm(El::NORMAL, El::NORMAL, alpha, A.LockedMatrix(), curBPanel.LockedMatrix(), beta, curCPanel);
+    log->debug("Done storing current C panel");
   }
 }
 
@@ -830,8 +827,6 @@ void TruncatedSVDCommand::run(Worker *self) const {
       DistMatrix * S = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * Sinv = new El::DistMatrix<double, El::VR, El::STAR>(nconv, 1, self->grid);
       DistMatrix * V = new El::DistMatrix<double, El::VR, El::STAR>(n, nconv, self->grid);
-      // maintaining a copy of V on each rank is expensive memory-wise, but seems to be only way to avoid GEMM relaying out and requiring even more memory
-      DistMatrix * Vlocal = new El::DistMatrix<double, El::STAR, El::STAR>(n, nconv, self->grid);
 
       ENSURE(self->matrices.insert(std::make_pair(UHandle, std::unique_ptr<DistMatrix>(U))).second);
       ENSURE(self->matrices.insert(std::make_pair(SHandle, std::unique_ptr<DistMatrix>(S))).second);
@@ -844,7 +839,6 @@ void TruncatedSVDCommand::run(Worker *self) const {
           if(V->IsLocal(rowIdx, colIdx))
             V->SetLocal(V->LocalRow(rowIdx), V->LocalCol(colIdx), rightEigs(rowIdx,colIdx));
       rightEigs.resize(0,0); // clear any memory this temporary variable used (a lot, since it's on every rank)
-      El::Copy(*V, *Vlocal); // make V store on every rank
 
       // populate S, Sinv
       for(El::Int idx=0; idx < (El::Int) nconv; idx++) {
@@ -856,10 +850,10 @@ void TruncatedSVDCommand::run(Worker *self) const {
       self->log->info("Stored V and S");
 
       // form U
-      self->log->info("computing A*V");
+      self->log->info("computing A*V = U*Sigma");
       self->log->info("A is {}-by-{}, V is {}-by-{}, the resulting matrix should be {}-by-{}", workingMat->Height(), workingMat->Width(), V->Height(), V->Width(), U->Height(), U->Width());
-      SaneGemm(El::NORMAL, El::NORMAL, 1.0, *workingMat, *Vlocal, 0.0, *U, self->log);
-      self->log->info("done computing A*V");
+      Gemm(1.0, *workingMat, *V, 0.0, *U, self->log);
+      self->log->info("done computing A*V, rescaling to get U");
       // TODO: do a QR instead to ensure stability, but does column pivoting so would require postprocessing S,V to stay consistent
       El::DiagonalScale(El::RIGHT, El::NORMAL, *Sinv, *U);
       self->log->info("Computed and stored U");
@@ -970,12 +964,14 @@ void ThinSVDCommand::run(Worker *self) const {
 void MatrixMulCommand::run(Worker *self) const {
   auto m = self->matrices[inputA]->Height();
   auto n = self->matrices[inputB]->Width();
-  DistMatrix * matrix = new El::DistMatrix<double, El::VR, El::STAR>(m, n, self->grid);
-  //El::Zero(matrix);
-  ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(matrix))).second);
-  El::Gemm(El::NORMAL, El::NORMAL, 1.0, *self->matrices[inputA], *self->matrices[inputB], 0.0, *matrix);
-  // Avoids communicating the A (hopefully means the distreadwrite proxy is not expensive)
-  //El::gemm::SUMMA_NNA(1.0, *self->matrices[inputA], *self->matrices[inputB], *matrix);
+  self->log->info("Arrived in matrix multiplication code");
+  auto A = dynamic_cast<El::DistMatrix<double, El::VR, El::STAR>*>(self->matrices[inputA].get());
+  auto B = dynamic_cast<El::DistMatrix<double, El::VR, El::STAR>*>(self->matrices[inputB].get());
+  auto C = new El::DistMatrix<double, El::VR, El::STAR>(m, n, self->grid);
+  ENSURE(self->matrices.insert(std::make_pair(handle, std::unique_ptr<DistMatrix>(C))).second);
+  self->log->info("Starting multiplication");
+  Gemm(1.0, *A, *B, 0.0, *C, self->log);
+  self->log->info("Done with multiplication");
   self->world.barrier();
 }
 
