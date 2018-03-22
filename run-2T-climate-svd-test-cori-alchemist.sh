@@ -1,9 +1,9 @@
 #!/bin/bash
 
 #SBATCH -q premium
-#SBATCH -N 278
+#SBATCH -N 40
 #SBATCH -t 00:07:00
-#SBATCH -J eight-replicated
+#SBATCH -J single-replicated
 #SBATCH --mail-user=gittea@rpi.edu
 #SBATCH --mail-type=ALL
 #SBATCH -e mysparkjob_%j.err
@@ -12,7 +12,7 @@
 #module load collectl
 #start-collectl.sh 
 
-source setup/cori-start-alchemist.sh 276 2
+source setup/cori-start-alchemist.sh 38 2
 sleep 15
 
 # 2.2TB dataset => (18 machines to hold in memory one copy of this dataset)
@@ -22,7 +22,7 @@ fname=/global/cscratch1/sd/gittens/large-datasets/rda_ds093.0_dataset/outputs/oc
 useAlc=1
 loadAlc=1
 varname=/rows
-colreplicas=8
+colreplicas=2
 
 spark-submit --verbose\
   --driver-memory 120G\
